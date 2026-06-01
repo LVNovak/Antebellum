@@ -12,7 +12,6 @@
 
 import { GameState, Trophy, Season, LaborType } from './types'
 import { ACHIEVEMENT_THRESHOLDS } from './constants'
-import { computeConditionsIndex } from './labor'
 
 // ---------------------------------------------------------------------------
 // MAIN CHECK FUNCTION

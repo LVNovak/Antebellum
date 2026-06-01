@@ -15,7 +15,6 @@ type Step = 'home' | 'newgame'
 export default function StartScreen() {
   const startNewGame = useGameStore(s => s.startNewGame)
   const loadGame     = useGameStore(s => s.loadGame)
-  const isPlaying    = useGameStore(s => s.isPlaying)
 
   const [step, setStep]                     = useState<Step>('home')
   const [playerName, setPlayerName]         = useState('')

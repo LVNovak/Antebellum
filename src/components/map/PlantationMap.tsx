@@ -51,7 +51,7 @@ export default function PlantationMap() {
       </div>
 
       {/* Tile detail panel */}
-      {selectedTile && <TileDetail tile={selectedTile} seasonsPlayed={(gameState.currentYear - 1) * 4} />}
+      {selectedTile && <TileDetail tile={selectedTile} />}
     </div>
   )
 }
@@ -92,7 +92,7 @@ function TileCard({
 
 // ── Tile detail panel ──────────────────────────────────────────────────────
 
-function TileDetail({ tile, seasonsPlayed }: { tile: Tile; seasonsPlayed: number }) {
+function TileDetail({ tile }: { tile: Tile }) {
   const soilColor = getSoilColorCategory(tile.soil)
 
   return (

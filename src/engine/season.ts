@@ -30,7 +30,6 @@ import {
   Season,
   WeatherEvent,
   CropType,
-  LaborType,
   HealthLevel,
 } from './types'
 

@@ -31,9 +31,8 @@ export default function LaborRoster() {
 
   // Group workers by labor type
   const grouped = workers.reduce((acc, worker) => {
-    const existing = acc[worker.laborType]
-    if (!existing) acc[worker.laborType] = []
-    acc[worker.laborType]!.push(worker)
+    if (!acc[worker.laborType]) acc[worker.laborType] = []
+    acc[worker.laborType].push(worker)
     return acc
   }, {} as Partial<Record<LaborType, Worker[]>>)
 

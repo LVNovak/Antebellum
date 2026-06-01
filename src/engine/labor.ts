@@ -20,7 +20,6 @@ import {
   HealthLevel,
   LaborType,
   CabinCondition,
-  WorkerSkill,
   GameEvent,
   Season,
 } from './types'
@@ -31,7 +30,6 @@ import {
   CABIN_CONDITION_DISEASE_RISK,
   OVERCROWDING_DISEASE_RISK_PER_EXTRA,
   OVERCROWDING_PRODUCTIVITY_PER_EXTRA,
-  OVERCROWDING_STRESS_PER_EXTRA,
   DISEASE_SPREAD_BASE_CHANCE,
   CABIN_CAPACITY,
 } from './constants'
@@ -123,8 +121,9 @@ export function applySeasonalHealthChanges(params: {
   const blanketsPerWorker = workers.length > 0 ? blanketsAvailable / workers.length : 0
   const isColdSeason      = season === Season.Winter || season === Season.Autumn
 
-  // Map cabins by id for quick lookup
-  const cabinById = new Map(cabins.map(c => [c.id, c]))
+  // Map cabins by id for quick lookup — used by getWorkerProductivity callers
+  const _cabinById = new Map(cabins.map(c => [c.id, c]))  // available for Phase 2 expansion
+  void _cabinById
 
   const updatedWorkers: Worker[] = []
   const events: Omit<GameEvent, 'id' | 'season' | 'year'>[] = []

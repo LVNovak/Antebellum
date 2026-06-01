@@ -20,7 +20,6 @@ import {
   QueuedSale,
   Factor,
   Storage,
-  GameEvent,
 } from './types'
 
 import {
@@ -151,8 +150,9 @@ export function processQueuedSales(params: {
 }): SaleResult {
   const { sales, storage, market, factor, commissionRate } = params
 
-  let totalRevenue   = 0
+  let totalRevenue    = 0
   let totalCommission = 0
+  let factor          = params.factor  // local mutable copy
   const salesExecuted: ExecutedSale[] = []
   const salesRejected: RejectedSale[] = []
 
