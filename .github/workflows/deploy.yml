@@ -1,56 +1,39 @@
-# .github/workflows/deploy.yml
-#
-# Automatically builds and deploys the game to GitHub Pages
-# whenever you push code to the main branch.
-#
-# How it works:
-#   1. You push code to GitHub
-#   2. This workflow runs automatically
-#   3. It builds the game (npm run build)
-#   4. It pushes the built files to GitHub Pages
-#   5. Your game is live at https://lvnovak.github.io/Antebellum/
-#
-# You never need to run this manually.
-
 name: Deploy to GitHub Pages
 
 on:
   push:
     branches:
-      - main   # runs every time you push to the main branch
+      - main
 
 permissions:
-  contents: write  # needed to push to gh-pages branch
+  contents: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Check out your code
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Step 2: Set up Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '24'
           cache: 'npm'
 
-      # Step 3: Install dependencies
       - name: Install dependencies
         run: npm ci
 
-      # Step 4: Run tests — build fails if tests fail
       - name: Run tests
         run: npm test -- --run
 
-      # Step 5: Build the game
       - name: Build
         run: npm run build
 
-      # Step 6: Deploy the built files to GitHub Pages
       - name: Deploy
         uses: peaceiris/actions-gh-pages@v3
         with:
