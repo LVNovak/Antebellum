@@ -19,8 +19,8 @@ export default function MarketPanel() {
   if (!gameState) return null
 
   const { storage, market, finances } = gameState
-  const totalStored = Object.values(storage.inventory).reduce((s, q) => s + (q ?? 0), 0)
-  const storageUsed = totalStored
+  const totalStored: number = Object.values(storage.inventory).reduce((s: number, q) => s + ((q as number) ?? 0), 0)
+  const storageUsed: number = totalStored
   const storagePct  = storage.capacity > 0 ? Math.round((storageUsed / storage.capacity) * 100) : 0
 
   return (

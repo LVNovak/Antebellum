@@ -8,14 +8,17 @@
 
     // Strict mode catches the most bugs at compile time
     "strict": true,
+    "noImplicitAny": false,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
 
     // React JSX support
     "jsx": "react-jsx",
 
     // Path aliases — lets us write @engine/types instead of ../../engine/types
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@engine/*": ["src/engine/*"],

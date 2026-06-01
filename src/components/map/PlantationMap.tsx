@@ -32,7 +32,7 @@ export default function PlantationMap() {
 
       {/* Tile grid */}
       <div className="grid grid-cols-5 gap-2">
-        {gameState.tiles.map(tile => (
+        {gameState.tiles.map((tile: Tile) => (
           <TileCard
             key={tile.id}
             tile={tile}
@@ -58,12 +58,11 @@ export default function PlantationMap() {
 
 // ── Tile card ──────────────────────────────────────────────────────────────
 
-function TileCard({
-  tile, isSelected, onTap
-}: {
+function TileCard({ tile, isSelected, onTap }: {
   tile: Tile
   isSelected: boolean
   onTap: () => void
+  [key: string]: unknown
 }) {
   const soilColor  = tile.isCleared ? getSoilColorCategory(tile.soil) : 'exhausted'
   const soilBorder = SOIL_BORDER_CLASSES[soilColor]

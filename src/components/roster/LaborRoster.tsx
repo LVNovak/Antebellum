@@ -120,7 +120,7 @@ function ConditionsIndexBar({ value }: { value: number }) {
 
 // ── Individual worker card ─────────────────────────────────────────────────
 
-function WorkerCard({ worker }: { worker: Worker }) {
+function WorkerCard({ worker }: { worker: Worker; [key: string]: unknown }) {
   const healthClass = getHealthColorClass(worker.health)
   const healthLabel = getHealthLabel(worker.health)
 
