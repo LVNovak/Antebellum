@@ -1,0 +1,29 @@
+/* index.css — global styles */
+/* Tailwind's base, components, and utilities */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base document styles */
+@layer base {
+  html {
+    font-family: system-ui, sans-serif;
+    background-color: #1e0f05;
+    color: #f0e8d6;
+  }
+
+  /* Serif for headings and ledger numbers */
+  h1, h2, h3, h4 {
+    font-family: Georgia, Cambria, serif;
+  }
+
+  /* Prevent text selection on UI chrome */
+  button, label {
+    user-select: none;
+  }
+
+  /* Smooth scrolling within panels */
+  .panel-scroll {
+    scroll-behavior: smooth;
+  }
+}
