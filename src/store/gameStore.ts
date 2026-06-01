@@ -295,7 +295,7 @@ function buildCabin(id: string) {
 // Phase 2 will have a full name generator by demographic
 const STARTING_WORKER_NAMES = ['Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Tom', 'Hannah']
 
-function buildStartingWorker(id: string, cabinId: string) {
+function buildStartingWorker(id: string, _cabinId: string) {
   const name = STARTING_WORKER_NAMES[Math.floor(Math.random() * STARTING_WORKER_NAMES.length)]
   return {
     id,

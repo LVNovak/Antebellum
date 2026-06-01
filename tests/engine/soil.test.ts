@@ -11,7 +11,6 @@ import {
   isSoilExhausted,
   hasCriticalSoilDeficiency,
   getSoilColorCategory,
-  getCompositeScore,
   applySeasonalSoilUpdate,
 } from '../../src/engine/soil'
 import { SoilHealth, CropType, WeatherEvent, TerrainType } from '../../src/engine/types'
