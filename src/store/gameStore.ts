@@ -1,18 +1,14 @@
 /**
  * gameStore.ts
  *
- * The global state store for the game, built with Zustand.
+ * Global state store. Bridges the game engine (pure logic) and the UI (React).
  *
- * This is the bridge between the game engine (pure logic) and the UI (React).
- * The UI reads state from this store and calls actions to change it.
- * The store calls engine functions to compute new state, then saves the result.
- *
- * Think of it as three layers:
+ * Three layers:
  *   Engine (logic) → Store (state + actions) → UI (display)
  *
- * The engine never knows about the UI.
+ * The engine never imports from UI.
  * The UI never contains game logic.
- * The store is the only place they connect.
+ * The store is the only connection point.
  */
 
 import { create } from 'zustand'
@@ -29,45 +25,145 @@ import {
   TerrainType,
 } from '@engine/types'
 import { resolveSeasonEnd } from '@engine/season'
-import { STORAGE_CAPACITY_NONE } from '@engine/constants'
+import {
+  STORAGE_CAPACITY_NONE,
+  STORAGE_CAPACITY_SMOKEHOUSE,
+  SMOKEHOUSE_BUILD_COST_MIN,
+} from '@engine/constants'
+
+// ---------------------------------------------------------------------------
+// SEASON PLAN
+// Labor allocation the player sets before ending a season.
+// Keys are task identifiers; values are worker counts allocated.
+// ---------------------------------------------------------------------------
+
+export interface SeasonPlan {
+  // tileId -> action -> workers allocated
+  tileAllocations: Record<string, TileAction>
+  // workers allocated to cabin repair (spread across all cabins)
+  cabinRepairWorkers: number
+  // workers allocated to storage management
+  storageWorkers: number
+  // remaining workers rest automatically
+}
+
+export type TileAction =
+  | { type: 'Clear';   workers: number }
+  | { type: 'Plant';   workers: number; crop: CropType }
+  | { type: 'Tend';    workers: number }
+  | { type: 'Harvest'; workers: number }
+  | { type: 'Idle' }
 
 // ---------------------------------------------------------------------------
 // STORE SHAPE
 // ---------------------------------------------------------------------------
 
-/**
- * Everything the UI can read or do.
- */
 interface GameStore {
-  // The complete game state (null = no game started yet)
-  gameState: GameState | null
-
-  // Whether a game is currently in progress
-  isPlaying: boolean
-
-  // UI state — which main panel is currently shown
-  activePanel: 'map' | 'roster' | 'ledger' | 'market' | 'summary' | 'trophies'
-
-  // Whether the season summary overlay is showing
+  gameState:            GameState | null
+  isPlaying:            boolean
+  activePanel:          'map' | 'roster' | 'ledger' | 'market' | 'trophies'
   showingSeasonSummary: boolean
+  showingSeasonPlanner: boolean
+  lastSeasonEvents:     GameState['eventLog']
+  seasonPlan:           SeasonPlan
 
-  // The events from the most recently resolved season (shown in summary)
-  lastSeasonEvents: GameState['eventLog']
+  // Core game actions
+  startNewGame:           (params: NewGameParams) => void
+  advanceSeason:          () => void
+  dismissSeasonSummary:   () => void
+  setActivePanel:         (panel: GameStore['activePanel']) => void
+  saveGame:               () => void
+  loadGame:               () => boolean
+  resetGame:              () => void
 
-  // Actions the UI can call
-  startNewGame:       (params: NewGameParams) => void
-  advanceSeason:      () => void
-  setActivePanel:     (panel: GameStore['activePanel']) => void
-  dismissSeasonSummary: () => void
-  saveGame:           () => void
-  loadGame:           () => boolean
-  resetGame:          () => void
+  // Season planning actions
+  openSeasonPlanner:      () => void
+  closeSeasonPlanner:     () => void
+  setTileAction:          (tileId: string, action: TileAction) => void
+  setCabinRepairWorkers:  (count: number) => void
+  setStorageWorkers:      (count: number) => void
+  confirmPlanAndAdvance:  () => void
+
+  // Supply and build actions
+  buySupplies:            (corn: number, blankets: number) => void
+  buildSmokehouse:        () => void
+  queueSale:              (crop: CropType, quantity: number, minPrice: number | null) => void
 }
 
 interface NewGameParams {
   playerName:      string
   origin:          Origin
   startingCapital: StartingCapital
+}
+
+// ---------------------------------------------------------------------------
+// HELPERS
+// ---------------------------------------------------------------------------
+
+function emptySeasonPlan(): SeasonPlan {
+  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0 }
+}
+
+/**
+ * Counts total workers allocated in a plan.
+ */
+export function countAllocatedWorkers(plan: SeasonPlan): number {
+  const tileTotal = Object.values(plan.tileAllocations).reduce((sum, action) => {
+    if (action.type === 'Idle') return sum
+    return sum + action.workers
+  }, 0)
+  return tileTotal + plan.cabinRepairWorkers + plan.storageWorkers
+}
+
+/**
+ * Applies the season plan to worker assignments in the game state.
+ * Returns updated workers with assignedTask set.
+ */
+function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['workers'] {
+  // Build a flat list of assignments: [workerId, task]
+  // We assign workers in order from the roster — the engine handles
+  // individual productivity from there.
+  const assignments: Array<GameState['workers'][0]['assignedTask']> = []
+
+  // Tile assignments
+  for (const [tileId, action] of Object.entries(plan.tileAllocations)) {
+    if (action.type === 'Idle') continue
+    for (let i = 0; i < action.workers; i++) {
+      if (action.type === 'Clear')   assignments.push({ type: 'ClearLand',   tileId })
+      if (action.type === 'Plant')   assignments.push({ type: 'PlantCrop',   tileId, crop: action.crop })
+      if (action.type === 'Tend')    assignments.push({ type: 'TendCrop',    tileId })
+      if (action.type === 'Harvest') assignments.push({ type: 'HarvestCrop', tileId })
+    }
+  }
+
+  // Cabin repair
+  for (let i = 0; i < plan.cabinRepairWorkers; i++) {
+    const cabinId = 'cabin-1' // Phase 1: single cabin target
+    assignments.push({ type: 'RepairCabin', cabinId })
+  }
+
+  // Storage
+  for (let i = 0; i < plan.storageWorkers; i++) {
+    assignments.push({ type: 'ManageStorage' })
+  }
+
+  // Assign workers in roster order; remaining workers rest
+  return state.workers.map((worker, index) => ({
+    ...worker,
+    assignedTask: index < assignments.length ? assignments[index] : { type: 'Rest' as const },
+  }))
+}
+
+/**
+ * Applies crop planting from the plan to tiles.
+ * Tiles with a Plant action get their currentCrop set.
+ */
+function applyPlanToTiles(state: GameState, plan: SeasonPlan): GameState['tiles'] {
+  return state.tiles.map(tile => {
+    const action = plan.tileAllocations[tile.id]
+    if (!action || action.type !== 'Plant') return tile
+    return { ...tile, currentCrop: action.crop }
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -79,9 +175,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
   isPlaying:            false,
   activePanel:          'map',
   showingSeasonSummary: false,
+  showingSeasonPlanner: false,
   lastSeasonEvents:     [],
+  seasonPlan:           emptySeasonPlan(),
 
-  // ── Start a new game ───────────────────────────────────────────────────
+  // ── Start a new game ─────────────────────────────────────────────────────
   startNewGame: (params) => {
     const initialState = buildInitialGameState(params)
     set({
@@ -89,41 +187,157 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isPlaying:            true,
       activePanel:          'map',
       showingSeasonSummary: false,
+      showingSeasonPlanner: false,
       lastSeasonEvents:     [],
+      seasonPlan:           emptySeasonPlan(),
     })
     saveToLocalStorage(initialState)
   },
 
-  // ── Advance to the next season ─────────────────────────────────────────
-  advanceSeason: () => {
-    const { gameState } = get()
+  // ── Season planner ────────────────────────────────────────────────────────
+  openSeasonPlanner: () => set({ showingSeasonPlanner: true }),
+  closeSeasonPlanner: () => set({ showingSeasonPlanner: false }),
+
+  setTileAction: (tileId, action) => set(s => ({
+    seasonPlan: {
+      ...s.seasonPlan,
+      tileAllocations: { ...s.seasonPlan.tileAllocations, [tileId]: action },
+    }
+  })),
+
+  setCabinRepairWorkers: (count) => set(s => ({
+    seasonPlan: { ...s.seasonPlan, cabinRepairWorkers: count }
+  })),
+
+  setStorageWorkers: (count) => set(s => ({
+    seasonPlan: { ...s.seasonPlan, storageWorkers: count }
+  })),
+
+  // ── Confirm plan and advance season ──────────────────────────────────────
+  confirmPlanAndAdvance: () => {
+    const { gameState, seasonPlan } = get()
     if (!gameState) return
 
-    const eventCountBefore = gameState.eventLog.length
-    const nextState        = resolveSeasonEnd(gameState)
+    // Apply plan to workers and tiles before resolving the season
+    const withAssignments: GameState = {
+      ...gameState,
+      workers: applyPlanToWorkers(gameState, seasonPlan),
+      tiles:   applyPlanToTiles(gameState, seasonPlan),
+    }
+
+    const eventCountBefore = withAssignments.eventLog.length
+    const nextState        = resolveSeasonEnd(withAssignments)
     const newEvents        = nextState.eventLog.slice(eventCountBefore)
 
     set({
       gameState:            nextState,
+      showingSeasonPlanner: false,
       showingSeasonSummary: true,
       lastSeasonEvents:     newEvents,
+      seasonPlan:           emptySeasonPlan(), // reset plan for next season
     })
     saveToLocalStorage(nextState)
   },
 
-  // ── UI panel navigation ────────────────────────────────────────────────
-  setActivePanel: (panel) => set({ activePanel: panel }),
+  // ── Legacy advance (kept for TopBar button — opens planner instead) ───────
+  advanceSeason: () => {
+    set({ showingSeasonPlanner: true })
+  },
 
-  // ── Dismiss the end-of-season summary overlay ─────────────────────────
+  // ── Buy supplies ──────────────────────────────────────────────────────────
+  buySupplies: (corn, blankets) => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    // Corn costs $2/unit, blankets $3 each (approximate period prices)
+    const cornCost    = corn * 2
+    const blanketCost = blankets * 3
+    const totalCost   = cornCost + blanketCost
+
+    if (gameState.finances.cashOnHand < totalCost) return  // can't afford
+
+    // Corn goes into a simple counter for now (Phase 2 adds full inventory)
+    // For now we add it as a stored unit in the inventory under Corn
+    const currentCorn = gameState.storage.inventory[CropType.Corn] ?? 0
+
+    const updated: GameState = {
+      ...gameState,
+      blanketsOnHand: gameState.blanketsOnHand + blankets,
+      storage: {
+        ...gameState.storage,
+        inventory: {
+          ...gameState.storage.inventory,
+          [CropType.Corn]: currentCorn + corn,
+        },
+      },
+      finances: {
+        ...gameState.finances,
+        cashOnHand: gameState.finances.cashOnHand - totalCost,
+      },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Build smokehouse ──────────────────────────────────────────────────────
+  buildSmokehouse: () => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (gameState.storage.capacity >= STORAGE_CAPACITY_SMOKEHOUSE) return // already built
+    if (gameState.finances.cashOnHand < SMOKEHOUSE_BUILD_COST_MIN) return
+
+    const updated: GameState = {
+      ...gameState,
+      storage: { ...gameState.storage, capacity: STORAGE_CAPACITY_SMOKEHOUSE },
+      finances: {
+        ...gameState.finances,
+        cashOnHand: gameState.finances.cashOnHand - SMOKEHOUSE_BUILD_COST_MIN,
+      },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Queue a sale ──────────────────────────────────────────────────────────
+  queueSale: (crop, quantity, minPrice) => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    const available = gameState.storage.inventory[crop] ?? 0
+    if (available < quantity) return
+
+    const sale = {
+      id:             Math.random().toString(36).slice(2, 10),
+      crop,
+      quantity,
+      minPriceFloor:  minPrice,
+      queuedOnSeason: gameState.currentSeason,
+      queuedOnYear:   gameState.currentYear,
+    }
+
+    const updated: GameState = {
+      ...gameState,
+      finances: {
+        ...gameState.finances,
+        queuedSales: [...gameState.finances.queuedSales, sale],
+      },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Dismiss season summary ────────────────────────────────────────────────
   dismissSeasonSummary: () => set({ showingSeasonSummary: false }),
 
-  // ── Save to LocalStorage ───────────────────────────────────────────────
+  // ── UI nav ────────────────────────────────────────────────────────────────
+  setActivePanel: (panel) => set({ activePanel: panel }),
+
+  // ── Save/load/reset ───────────────────────────────────────────────────────
   saveGame: () => {
     const { gameState } = get()
     if (gameState) saveToLocalStorage(gameState)
   },
 
-  // ── Load from LocalStorage ─────────────────────────────────────────────
   loadGame: () => {
     const saved = loadFromLocalStorage()
     if (!saved) return false
@@ -131,10 +345,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     return true
   },
 
-  // ── Reset everything ───────────────────────────────────────────────────
   resetGame: () => {
     localStorage.removeItem(SAVE_KEY)
-    set({ gameState: null, isPlaying: false, activePanel: 'map' })
+    set({ gameState: null, isPlaying: false, activePanel: 'map', seasonPlan: emptySeasonPlan() })
   },
 }))
 
@@ -148,7 +361,6 @@ function saveToLocalStorage(state: GameState): void {
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(state))
   } catch (e) {
-    // LocalStorage can fail if the browser is in private mode or storage is full
     console.warn('Could not save game:', e)
   }
 }
@@ -168,53 +380,41 @@ function loadFromLocalStorage(): GameState | null {
 // INITIAL STATE BUILDER
 // ---------------------------------------------------------------------------
 
-/**
- * Builds a fresh GameState for a new game.
- *
- * Sets up the starting land grant, cabins, initial finances, and market
- * based on the player's chosen origin and capital configuration.
- */
 function buildInitialGameState(params: NewGameParams): GameState {
   const { playerName, origin, startingCapital } = params
   const now = new Date().toISOString()
 
-  // Starting tile — the land grant
   const grantTile = buildGrantTile(origin)
-
-  // Starting cabins — all new planters start with 2 Fair cabins
-  const cabin1 = buildCabin('cabin-1')
-  const cabin2 = buildCabin('cabin-2')
-
-  // Starting workers — Phase 1 starts with 2 hired-out enslaved workers
-  const worker1 = buildStartingWorker('worker-1', cabin1.id)
-  const worker2 = buildStartingWorker('worker-2', cabin2.id)
+  const cabin1    = buildCabin('cabin-1')
+  const cabin2    = buildCabin('cabin-2')
+  const worker1   = buildStartingWorker('worker-1')
+  const worker2   = buildStartingWorker('worker-2')
 
   cabin1.occupants = [worker1.id]
   cabin2.occupants = [worker2.id]
 
-  // Starting finances
   const { cashOnHand, factorAdvance, personalNote } = getStartingFinances(startingCapital)
 
   return {
-    version:        '0.1.0',
-    createdAt:      now,
-    lastSavedAt:    now,
+    version:         '0.1.0',
+    createdAt:       now,
+    lastSavedAt:     now,
     playerName,
     origin,
     startingCapital,
-    currentYear:    1,
-    currentSeason:  Season.Spring,
-    tiles:          [grantTile],
-    workers:        [worker1, worker2],
-    cabins:         [cabin1, cabin2],
-    blanketsOnHand: 4,  // enough for 2 workers for 1 year
-    conditionsIndex: 75, // start in a reasonable state
+    currentYear:     1,
+    currentSeason:   Season.Spring,
+    tiles:           [grantTile],
+    workers:         [worker1, worker2],
+    cabins:          [cabin1, cabin2],
+    blanketsOnHand:  4,
+    conditionsIndex: 75,
     storage: {
-      capacity:              STORAGE_CAPACITY_NONE,  // no storage until smokehouse is built
-      inventory:             {},
-      seasonsStored:         {},
-      hasCooperAssigned:     false,
-      hasCarpenterAssigned:  false,
+      capacity:             STORAGE_CAPACITY_NONE,
+      inventory:            {},
+      seasonsStored:        {},
+      hasCooperAssigned:    false,
+      hasCarpenterAssigned: false,
     },
     market: {
       prices: {
@@ -234,31 +434,26 @@ function buildInitialGameState(params: NewGameParams): GameState {
         id:                 'factor-1',
         name:               'Thomas Heyward & Co.',
         city:               'Charleston',
-        relationshipScore:  50,   // neutral starting relationship
+        relationshipScore:  50,
         advanceOutstanding: factorAdvance,
         creditLimit:        800,
       },
       queuedSales: [],
     },
-    useSimplifiedSoilModel: true,  // Phase 1 — simplified until Phase 2
-    eventLog: [],
-    trophies: [],
+    useSimplifiedSoilModel: true,
+    eventLog:  [],
+    trophies:  [],
   }
 }
 
-// ── Land grant tile by origin ──────────────────────────────────────────────
-
 function buildGrantTile(origin: Origin) {
-  // Grant tiles vary by origin — see GDD Section 3.1
   const configs: Record<Origin, { isCleared: boolean; terrain: TerrainType }> = {
-    [Origin.VeteranWarrant]:       { isCleared: false, terrain: TerrainType.Forest  },
-    [Origin.PlanterSon]:           { isCleared: true,  terrain: TerrainType.Upland  },
-    [Origin.LotteryWinner]:        { isCleared: false, terrain: TerrainType.Forest  },
-    [Origin.ImmigrantEntrepreneur]:{ isCleared: false, terrain: TerrainType.Upland  },
+    [Origin.VeteranWarrant]:        { isCleared: false, terrain: TerrainType.Forest },
+    [Origin.PlanterSon]:            { isCleared: true,  terrain: TerrainType.Upland },
+    [Origin.LotteryWinner]:         { isCleared: false, terrain: TerrainType.Forest },
+    [Origin.ImmigrantEntrepreneur]: { isCleared: false, terrain: TerrainType.Upland },
   }
-
   const config = configs[origin]
-
   return {
     id:                        'tile-001',
     terrain:                   config.terrain,
@@ -277,8 +472,6 @@ function buildGrantTile(origin: Origin) {
   }
 }
 
-// ── Cabin builder ──────────────────────────────────────────────────────────
-
 function buildCabin(id: string) {
   return {
     id,
@@ -289,35 +482,25 @@ function buildCabin(id: string) {
   }
 }
 
-// ── Starting worker builder ────────────────────────────────────────────────
+const WORKER_NAMES = ['Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Tom', 'Hannah', 'Elias', 'Ruth']
 
-// Period-appropriate names for Phase 1 starting workers
-// Phase 2 will have a full name generator by demographic
-const STARTING_WORKER_NAMES = ['Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Tom', 'Hannah']
-
-function buildStartingWorker(id: string, _cabinId: string) {
-  const name = STARTING_WORKER_NAMES[Math.floor(Math.random() * STARTING_WORKER_NAMES.length)]
+function buildStartingWorker(id: string) {
+  const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)]
   return {
     id,
     name,
-    age:                       Math.floor(Math.random() * 20) + 20,  // 20-40
-    laborType:                 LaborType.EnslavedHiredOut,
-    skill:                     WorkerSkill.Field,
-    health:                    HealthLevel.Healthy,
-    assignedTask:              null,
-    individualScore:           75,
-    contractSeasonsRemaining:  null,
-    wagePerSeason:             null,
+    age:                      Math.floor(Math.random() * 20) + 20,
+    laborType:                LaborType.EnslavedHiredOut,
+    skill:                    WorkerSkill.Field,
+    health:                   HealthLevel.Healthy,
+    assignedTask:             null,
+    individualScore:          75,
+    contractSeasonsRemaining: null,
+    wagePerSeason:            null,
   }
 }
 
-// ── Starting finances by capital choice ───────────────────────────────────
-
-function getStartingFinances(capital: StartingCapital): {
-  cashOnHand:    number
-  factorAdvance: number
-  personalNote:  number
-} {
+function getStartingFinances(capital: StartingCapital) {
   switch (capital) {
     case StartingCapital.CashBuyer:
       return { cashOnHand: 1000, factorAdvance: 0,   personalNote: 0   }
