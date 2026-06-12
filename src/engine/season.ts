@@ -37,6 +37,7 @@ import {
   WEATHER_YIELD_MODIFIER,
   CROP_BASE_YIELD_PER_TILE,
   FINANCE_RATES,
+  LABOR_UNITS_PER_WORKER_PER_SEASON,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
@@ -82,7 +83,10 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const workersAssigned = clearingWorkersByTile.get(tile.id) ?? 0
     if (workersAssigned === 0) return tile
 
-    const newRemaining = Math.max(0, tile.clearingProgressRemaining - workersAssigned)
+    // Each worker contributes LABOR_UNITS_PER_WORKER_PER_SEASON toward
+    // the tile's clearing pool (see constants.ts to retune pacing).
+    const progressThisSeason = workersAssigned * LABOR_UNITS_PER_WORKER_PER_SEASON
+    const newRemaining = Math.max(0, tile.clearingProgressRemaining - progressThisSeason)
     const justCleared  = newRemaining === 0
 
     if (justCleared) {
@@ -478,14 +482,25 @@ function countWorkersByTask(
 }
 
 function estimateAssetValue(state: GameState): number {
-  // Simplified asset estimate for Phase 1
-  // Phase 2 will add worker and land market values
   const storedCropValue = Object.entries(state.storage.inventory)
     .reduce((sum, [crop, qty]) => {
       const price = state.market.prices[crop as CropType] ?? 0
       return sum + (qty ?? 0) * price
     }, 0)
-  return storedCropValue + (state.tiles.filter(t => t.isCleared).length * 50)
+
+  const landValue = state.tiles.reduce((sum, tile) => {
+    return sum + (tile.isCleared ? 100 : 40)
+  }, 0)
+
+  const laborValue = state.workers.reduce((sum, worker) => {
+    if (worker.laborType === 'EnslavedPurchased') return sum + 500
+    if (worker.laborType === 'IndenturedBlack' || worker.laborType === 'IndenturedWhite') return sum + 75
+    return sum
+  }, 0)
+
+  const provisionsValue = state.cornOnHand * 2
+
+  return storedCropValue + landValue + laborValue + provisionsValue
 }
 
 // Simplified yield modifier for the season resolver

@@ -29,6 +29,12 @@ import {
   STORAGE_CAPACITY_NONE,
   STORAGE_CAPACITY_SMOKEHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
+  LAND_PARCEL_COST,
+  WATER_ADJACENT_PRICE_PREMIUM,
+  LABOR_ACQUISITION_COST,
+  LABOR_SEASONAL_COST,
+  STARTING_SOIL_BY_TERRAIN,
+  LAND_CLEARING_COST,
 } from '@engine/constants'
 
 // ---------------------------------------------------------------------------
@@ -88,6 +94,10 @@ interface GameStore {
   buySupplies:            (corn: number, blankets: number) => void
   buildSmokehouse:        () => void
   queueSale:              (crop: CropType, quantity: number, minPrice: number | null) => void
+
+  // Land and labor acquisition
+  buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
+  hireWorker:             (laborType: LaborType) => void
 }
 
 interface NewGameParams {
@@ -316,7 +326,85 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
-  // ── Dismiss season summary ────────────────────────────────────────────────
+  // ── Buy a new land parcel ──────────────────────────────────────────────────
+  buyLandParcel: (terrain, isWaterAdjacent) => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    const baseCost  = LAND_PARCEL_COST[terrain]
+    const totalCost = baseCost + (isWaterAdjacent ? WATER_ADJACENT_PRICE_PREMIUM : 0)
+    if (gameState.finances.cashOnHand < totalCost) return
+
+    const soilStart = STARTING_SOIL_BY_TERRAIN[terrain]
+    const newTile = {
+      id:                        `tile-${String(gameState.tiles.length + 1).padStart(3, '0')}`,
+      terrain,
+      isCleared:                 false,
+      isWaterAdjacent,
+      soil:                      { ...soilStart },
+      currentCrop:               null as CropType | null,
+      hasStumpRot:               false,
+      stumpRotSeasonsLeft:       0,
+      clearingProgressRemaining: LAND_CLEARING_COST[terrain],
+    }
+
+    const updated: GameState = {
+      ...gameState,
+      tiles: [...gameState.tiles, newTile],
+      finances: { ...gameState.finances, cashOnHand: gameState.finances.cashOnHand - totalCost },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Hire a new worker ──────────────────────────────────────────────────────
+  hireWorker: (laborType) => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    const acquisitionCost = LABOR_ACQUISITION_COST[laborType].min
+    if (acquisitionCost > 0 && gameState.finances.cashOnHand < acquisitionCost) return
+
+    const totalCapacity = gameState.cabins.reduce((sum, c) => sum + c.capacity, 0)
+    if (gameState.workers.length >= totalCapacity) return  // no cabin space
+
+    const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)]
+    const newWorker = {
+      id:                       `worker-${gameState.workers.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      age:                      Math.floor(Math.random() * 25) + 18,
+      laborType,
+      skill:                    WorkerSkill.Field,
+      health:                   HealthLevel.Healthy,
+      assignedTask:             null,
+      individualScore:          75,
+      contractSeasonsRemaining: (laborType === LaborType.IndenturedBlack || laborType === LaborType.IndenturedWhite)
+        ? (4 + Math.floor(Math.random() * 4)) * 4  // 4-7 years, in seasons
+        : null,
+      wagePerSeason: laborType === LaborType.FreeWage
+        ? LABOR_SEASONAL_COST[LaborType.FreeWage].min
+        : null,
+    }
+
+    const updatedCabins = gameState.cabins.map(c => ({ ...c, occupants: [...c.occupants] }))
+    for (const cabin of updatedCabins) {
+      if (cabin.occupants.length < cabin.capacity) {
+        cabin.occupants.push(newWorker.id)
+        break
+      }
+    }
+
+    const updated: GameState = {
+      ...gameState,
+      workers: [...gameState.workers, newWorker],
+      cabins:  updatedCabins,
+      finances: { ...gameState.finances, cashOnHand: gameState.finances.cashOnHand - acquisitionCost },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+
   dismissSeasonSummary: () => set({ showingSeasonSummary: false }),
 
   // ── UI nav ────────────────────────────────────────────────────────────────
@@ -461,7 +549,7 @@ function buildGrantTile(origin: Origin) {
     currentCrop:               null,
     hasStumpRot:               false,
     stumpRotSeasonsLeft:       0,
-    clearingProgressRemaining: config.isCleared ? 0 : 3,
+    clearingProgressRemaining: config.isCleared ? 0 : LAND_CLEARING_COST[config.terrain],
   }
 }
 

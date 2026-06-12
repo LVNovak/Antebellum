@@ -20,7 +20,7 @@
  *   - ACHIEVEMENTS: threshold values
  */
 
-import { CabinCondition, CropType, HealthLevel, LaborType, Season, WeatherEvent } from './types'
+import { CabinCondition, CropType, HealthLevel, LaborType, Season, WeatherEvent, TerrainType } from './types'
 
 // ---------------------------------------------------------------------------
 // HEALTH
@@ -206,6 +206,58 @@ export const STARTING_SOIL_BY_TERRAIN = {
   Forest:  { organicMatter: 70, nitrogen: 45, soilFauna: 75, moistureRetention: 60 },
   Swamp:   { organicMatter: 80, nitrogen: 40, soilFauna: 70, moistureRetention: 90 },
 }
+
+// ---------------------------------------------------------------------------
+// LAND CLEARING
+// ---------------------------------------------------------------------------
+
+/**
+ * Total labor-units required to fully clear each terrain type.
+ * Matches GDD Section 3.3 land clearing cost table.
+ *
+ * "Labor-units" is a pool that drains over time — see
+ * LABOR_UNITS_PER_WORKER_PER_SEASON for the drain rate.
+ */
+export const LAND_CLEARING_COST: Record<TerrainType, number> = {
+  [TerrainType.Upland]: 1,   // open/meadow — minimal clearing needed
+  [TerrainType.Forest]: 3,   // most common starting land
+  [TerrainType.Swamp]:  8,   // requires drainage; highest cost
+}
+
+/**
+ * How many labor-units of clearing progress ONE worker contributes
+ * per season.
+ *
+ * This is the single dial that controls clearing speed without
+ * changing the season/turn structure. At 1.0, a Forest tile (3 units)
+ * takes 3 worker-seasons total — e.g. 1 worker for 3 seasons, or 3
+ * workers in 1 season. At 1.5, the same tile takes only 2 worker-seasons.
+ *
+ * Set to 1.5 based on playtesting: a single worker clears a Forest
+ * tile in 2 seasons, which feels purposeful without being tedious.
+ * Raise this further if clearing should feel faster; lower it if
+ * clearing should remain a longer-term investment.
+ */
+export const LABOR_UNITS_PER_WORKER_PER_SEASON = 1.5
+
+/**
+ * Cost to purchase one additional tile (~2-3 acres) from the land market.
+ *
+ * Grounded in historical land patent pricing: 100-acre patents sold for
+ * up to 3 pounds (60 shillings) in Virginia in the 1700s. Scaling down to
+ * a ~2.5-acre tile and adjusting for the practical value of a ready
+ * addition to an existing plantation cluster.
+ * Source: virginiaplaces.org, "How Colonists Acquired Title to Land in Virginia"
+ */
+export const LAND_PARCEL_COST: Record<TerrainType, number> = {
+  [TerrainType.Upland]: 60,
+  [TerrainType.Forest]: 40,
+  [TerrainType.Swamp]:  80,
+}
+
+// Water-adjacent parcels carry a price premium (GDD Section 3.2) but
+// reduce shipping costs and are required for rice.
+export const WATER_ADJACENT_PRICE_PREMIUM = 20
 
 // ---------------------------------------------------------------------------
 // CROPS — production values

@@ -19,8 +19,29 @@
 
 import { useState } from 'react'
 import { useGameStore, SeasonPlan, TileAction, countAllocatedWorkers } from '@store/gameStore'
-import { CropType, Tile } from '@engine/types'
-import { STORAGE_CAPACITY_SMOKEHOUSE, SMOKEHOUSE_BUILD_COST_MIN } from '@engine/constants'
+import { CropType, Tile, TerrainType, LaborType } from '@engine/types'
+import {
+  STORAGE_CAPACITY_SMOKEHOUSE,
+  SMOKEHOUSE_BUILD_COST_MIN,
+  LAND_PARCEL_COST,
+  WATER_ADJACENT_PRICE_PREMIUM,
+  LABOR_ACQUISITION_COST,
+  CABIN_BUILD_COST_MIN,
+} from '@engine/constants'
+
+const TERRAIN_LABELS: Record<TerrainType, string> = {
+  [TerrainType.Upland]: 'Upland (cleared/clearable farmland)',
+  [TerrainType.Forest]: 'Forest (needs clearing)',
+  [TerrainType.Swamp]:  'Swamp (required for rice)',
+}
+
+const LABOR_TYPE_LABELS: Record<LaborType, string> = {
+  [LaborType.EnslavedPurchased]: 'Enslaved (Purchase)',
+  [LaborType.EnslavedHiredOut]:  'Enslaved (Hired-Out)',
+  [LaborType.IndenturedBlack]:   'Indentured Servant — Black',
+  [LaborType.IndenturedWhite]:   'Indentured Servant — White',
+  [LaborType.FreeWage]:          'Free Wage Laborer',
+}
 
 // Phase 1 crops only
 const PHASE1_CROPS: CropType[] = [CropType.Tobacco, CropType.Corn]
@@ -47,6 +68,8 @@ export default function SeasonPlanner() {
   const buySupplies          = useGameStore(s => s.buySupplies)
   const buildSmokehouse      = useGameStore(s => s.buildSmokehouse)
   const queueSale            = useGameStore(s => s.queueSale)
+  const buyLandParcel        = useGameStore(s => s.buyLandParcel)
+  const hireWorker           = useGameStore(s => s.hireWorker)
 
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
@@ -55,7 +78,7 @@ export default function SeasonPlanner() {
 
   if (!gameState) return null
 
-  const { workers, tiles, storage, finances, currentSeason, currentYear } = gameState
+  const { workers, tiles, storage, finances, cabins, currentSeason, currentYear } = gameState
   const totalWorkers     = workers.length
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
@@ -66,6 +89,7 @@ export default function SeasonPlanner() {
   const blanketCost      = blanketsToBuy * 3
   const supplyCost       = cornCost + blanketCost
   const canAffordSupplies = finances.cashOnHand >= supplyCost
+  const cabinSpaceAvailable = cabins.reduce((sum, c) => sum + c.capacity, 0) - workers.length
 
   // Crops in storage that can be sold
   const sellableCrops = Object.entries(storage.inventory)
@@ -135,12 +159,18 @@ export default function SeasonPlanner() {
     if (actionType === 'Clear')   setTileAction(tile.id, { type: 'Clear',   workers })
     if (actionType === 'Tend')    setTileAction(tile.id, { type: 'Tend',    workers })
     if (actionType === 'Harvest') setTileAction(tile.id, { type: 'Harvest', workers })
-    if (actionType === 'Plant' && crop) setTileAction(tile.id, { type: 'Plant', workers, crop })
+    if (actionType === 'Plant') {
+      // Default to the first available crop if none specified yet —
+      // this lets the "Plant" button itself work on first click,
+      // immediately revealing the crop selector.
+      const cropToUse = crop ?? PHASE1_CROPS[0]
+      setTileAction(tile.id, { type: 'Plant', workers, crop: cropToUse })
+    }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-40 flex items-end justify-center">
-      <div className="bg-earth-900 border-t border-earth-700 w-full max-w-lg max-h-[92vh] flex flex-col">
+    <div className="fixed inset-0 bg-black/80 z-40 flex items-end sm:items-center justify-center">
+      <div className="bg-earth-900 border border-earth-700 sm:rounded-lg w-full max-w-lg max-h-[92vh] sm:max-h-[85vh] flex flex-col">
 
         {/* Header */}
         <div className="px-4 py-3 border-b border-earth-700 flex items-center justify-between">
@@ -267,6 +297,74 @@ export default function SeasonPlanner() {
                 />
               </div>
             )}
+          </Section>
+
+          {/* ── LAND & LABOR ── */}
+          <Section title="Acquire Land & Labor">
+            <div className="px-4 py-3 space-y-4">
+
+              {/* Land purchase */}
+              <div>
+                <p className="text-earth-200 text-sm font-bold mb-1">Buy Land Parcel</p>
+                <p className="text-earth-500 text-xs mb-2">~2-3 acres per parcel. Swamp required for rice but costs more.</p>
+                <div className="flex flex-col gap-1.5">
+                  {(Object.keys(TERRAIN_LABELS) as TerrainType[]).map(terrain => {
+                    const cost = LAND_PARCEL_COST[terrain]
+                    const canAfford = finances.cashOnHand >= cost
+                    return (
+                      <div key={terrain} className="flex items-center justify-between">
+                        <span className="text-earth-300 text-xs">{TERRAIN_LABELS[terrain]}</span>
+                        <button
+                          onClick={() => buyLandParcel(terrain, false)}
+                          disabled={!canAfford}
+                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                        >
+                          ${cost}
+                        </button>
+                      </div>
+                    )
+                  })}
+                  <div className="flex items-center justify-between pt-1 border-t border-earth-800 mt-1">
+                    <span className="text-earth-400 text-xs">Water-adjacent (rice-capable) swamp</span>
+                    <button
+                      onClick={() => buyLandParcel(TerrainType.Swamp, true)}
+                      disabled={finances.cashOnHand < LAND_PARCEL_COST[TerrainType.Swamp] + WATER_ADJACENT_PRICE_PREMIUM}
+                      className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                    >
+                      ${LAND_PARCEL_COST[TerrainType.Swamp] + WATER_ADJACENT_PRICE_PREMIUM}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Labor hiring */}
+              <div>
+                <p className="text-earth-200 text-sm font-bold mb-1">Hire Labor</p>
+                <p className="text-earth-500 text-xs mb-2">
+                  {cabinSpaceAvailable > 0
+                    ? `${cabinSpaceAvailable} cabin slot(s) available.`
+                    : `No cabin space — build a new cabin first ($${CABIN_BUILD_COST_MIN}+).`}
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {(Object.keys(LABOR_TYPE_LABELS) as LaborType[]).map(laborType => {
+                    const cost = LABOR_ACQUISITION_COST[laborType].min
+                    const canAfford = finances.cashOnHand >= cost && cabinSpaceAvailable > 0
+                    return (
+                      <div key={laborType} className="flex items-center justify-between">
+                        <span className="text-earth-300 text-xs">{LABOR_TYPE_LABELS[laborType]}</span>
+                        <button
+                          onClick={() => hireWorker(laborType)}
+                          disabled={!canAfford}
+                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                        >
+                          {cost > 0 ? `$${cost}` : 'Hire'}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
           </Section>
 
           {/* ── SUPPLIES ── */}
