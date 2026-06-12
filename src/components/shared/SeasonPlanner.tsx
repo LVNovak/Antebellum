@@ -38,7 +38,7 @@ const CROP_LABELS: Record<CropType, string> = {
 
 export default function SeasonPlanner() {
   const gameState            = useGameStore(s => s.gameState)
-  const seasonPlan           = useGameStore(s => s.seasonPlan)
+  const seasonPlan: SeasonPlan = useGameStore(s => s.seasonPlan)
   const setTileAction        = useGameStore(s => s.setTileAction)
   const setCabinRepair       = useGameStore(s => s.setCabinRepairWorkers)
   const setStorageWorkers    = useGameStore(s => s.setStorageWorkers)

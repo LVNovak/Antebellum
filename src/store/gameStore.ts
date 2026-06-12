@@ -256,20 +256,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     if (gameState.finances.cashOnHand < totalCost) return  // can't afford
 
-    // Corn goes into a simple counter for now (Phase 2 adds full inventory)
-    // For now we add it as a stored unit in the inventory under Corn
-    const currentCorn = gameState.storage.inventory[CropType.Corn] ?? 0
-
     const updated: GameState = {
       ...gameState,
       blanketsOnHand: gameState.blanketsOnHand + blankets,
-      storage: {
-        ...gameState.storage,
-        inventory: {
-          ...gameState.storage.inventory,
-          [CropType.Corn]: currentCorn + corn,
-        },
-      },
+      cornOnHand:     gameState.cornOnHand + corn,
       finances: {
         ...gameState.finances,
         cashOnHand: gameState.finances.cashOnHand - totalCost,
@@ -408,6 +398,9 @@ function buildInitialGameState(params: NewGameParams): GameState {
     workers:         [worker1, worker2],
     cabins:          [cabin1, cabin2],
     blanketsOnHand:  4,
+    // Starting provisions: 8 units ≈ 4 seasons of food for 2 workers,
+    // giving the player one year before corn becomes critical.
+    cornOnHand:      8,
     conditionsIndex: 75,
     storage: {
       capacity:             STORAGE_CAPACITY_NONE,
@@ -419,7 +412,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     market: {
       prices: {
         [CropType.Tobacco]:     12,
-        [CropType.Rice]:        8,
+        [CropType.Rice]:        10,
         [CropType.Indigo]:      7,
         [CropType.Corn]:        2,
       },

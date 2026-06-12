@@ -429,6 +429,10 @@ export interface GameState {
   // Blanket supply — tracked separately as a physical supply item
   blanketsOnHand: number  // each worker needs 0.25 per season (1 per year)
 
+  // Corn provisions stockpile — accumulates from harvest and purchases,
+  // depleted by worker upkeep each season (1 unit per worker per season)
+  cornOnHand: number
+
   // Aggregate welfare index for enslaved workers (0–100)
   // Derived from individual worker scores each season
   conditionsIndex: number

@@ -113,6 +113,36 @@ export const LABOR_SEASONAL_COST: Record<LaborType, { min: number; max: number }
   [LaborType.FreeWage]:          { min: 35,  max: 55  },  // market wages; 3-5x enslaved
 }
 
+/**
+ * One-time acquisition cost by labor type — the price to add a worker
+ * to the roster.
+ *
+ * Grounded in historical indentured servant pricing: outfitting and
+ * transport cost £6-10, but servants were resold/indentured for
+ * £40-60 depending on skill and remaining contract term — roughly
+ * 75-130% of a median Chesapeake worker's annual income at the time.
+ * Source: delanceyplace.com / Perkins, "The Economy of Colonial America"
+ *
+ * Converting at $1 ≈ 1 shilling (20 shillings = £1):
+ *   £6-10  → $120-200  (transport/outfitting cost — the floor)
+ *   £40-60 → $800-1200 (resale/indenture price — the ceiling)
+ *
+ * Enslaved purchase sits at the high end of this range and beyond,
+ * reflecting that purchase conveys permanent ownership with no
+ * contract expiration — historically the most expensive acquisition
+ * but the cheapest ongoing cost (see LABOR_SEASONAL_COST above).
+ *
+ * Hired-out enslaved and rental-based indenture have no acquisition
+ * cost — only the seasonal rental fee in LABOR_SEASONAL_COST.
+ */
+export const LABOR_ACQUISITION_COST: Record<LaborType, { min: number; max: number }> = {
+  [LaborType.EnslavedPurchased]: { min: 900, max: 1400 },  // permanent asset; highest upfront cost
+  [LaborType.EnslavedHiredOut]:  { min: 0,   max: 0    },  // no purchase — seasonal rental only
+  [LaborType.IndenturedBlack]:   { min: 120, max: 250  },  // contract fee — lower end of servant pricing
+  [LaborType.IndenturedWhite]:   { min: 120, max: 250  },  // contract fee — lower end of servant pricing
+  [LaborType.FreeWage]:          { min: 0,   max: 0    },  // hiring cost only — see LABOR_SEASONAL_COST
+}
+
 // ---------------------------------------------------------------------------
 // SOIL — food web engine
 // ---------------------------------------------------------------------------
@@ -182,15 +212,35 @@ export const STARTING_SOIL_BY_TERRAIN = {
 // ---------------------------------------------------------------------------
 
 /**
+ * SCALE DEFINITION (grounded in historical research):
+ *
+ * One game tile represents approximately 2-3 acres of farmland.
+ * This matches the documented late-17th-century rate at which a single
+ * field worker could tend a tobacco crop plus provisions (roughly
+ * 1.5-2 acres of tobacco, or up to ~3 acres of less labor-intensive crops).
+ *
+ * Source: Encyclopedia Virginia / Herndon, "Tobacco in Colonial Virginia" —
+ * one worker tended ~1.5-2 acres of tobacco yielding 1,500-2,000 lbs/year,
+ * plus 6-7 barrels of corn for provisioning.
+ *
+ * Practical implication: CROP_LABOR_TO_PLANT and CROP_LABOR_TO_HARVEST
+ * below are calibrated so that ONE worker can fully tend ONE tile of
+ * tobacco across a season (plant + tend + harvest), matching the
+ * historical 1-worker-per-tile ratio for the primary cash crop.
+ * Rice, being "very high" labor per the GDD, requires more workers per
+ * tile — reflecting the much larger labor demands of wetland cultivation.
+ */
+
+/**
  * Labor-seasons required to plant one tile of each crop.
  */
 export const CROP_LABOR_TO_PLANT: Record<CropType, number> = {
-  [CropType.Tobacco]:     2,
-  [CropType.Rice]:        3,
+  [CropType.Tobacco]:     1,
+  [CropType.Rice]:        2,
   [CropType.Corn]:        1,
   [CropType.Cowpeas]:     1,
   [CropType.SweetPotato]: 1,
-  [CropType.Indigo]:      2,
+  [CropType.Indigo]:      1,
   [CropType.CoverCrop]:   1,
   [CropType.Fallow]:      0,  // no labor needed — just leave the field
 }
@@ -199,12 +249,12 @@ export const CROP_LABOR_TO_PLANT: Record<CropType, number> = {
  * Labor-seasons required to harvest one tile of each crop.
  */
 export const CROP_LABOR_TO_HARVEST: Record<CropType, number> = {
-  [CropType.Tobacco]:     3,
-  [CropType.Rice]:        4,
+  [CropType.Tobacco]:     1,
+  [CropType.Rice]:        2,
   [CropType.Corn]:        1,
   [CropType.Cowpeas]:     1,
   [CropType.SweetPotato]: 1,
-  [CropType.Indigo]:      2,
+  [CropType.Indigo]:      1,
   [CropType.CoverCrop]:   0,  // not harvested — plowed back in
   [CropType.Fallow]:      0,
 }
@@ -212,6 +262,13 @@ export const CROP_LABOR_TO_HARVEST: Record<CropType, number> = {
 /**
  * Base units produced per tile at 100% soil yield modifier.
  * Actual yield = base * soil yield modifier * weather modifier.
+ *
+ * Tobacco: historical yield was ~1,000 lbs/acre on a 2-acre tile = ~2,000 lbs.
+ * Game "units" are abstracted (1 unit ≈ 100 lbs) so base yield of 8 represents
+ * roughly 800 lbs at full soil health — slightly below the historical average
+ * to leave room for soil/weather bonuses to exceed the historical baseline.
+ *
+ * Corn: 6-7 barrels per worker historically. 1 game unit ≈ 1 barrel-equivalent.
  */
 export const CROP_BASE_YIELD_PER_TILE: Record<CropType, number> = {
   [CropType.Tobacco]:     8,
@@ -273,12 +330,39 @@ export const STARTING_CAPITAL = {
 /**
  * Base market price per unit.
  * Actual price fluctuates each season around this base.
+ *
+ * Pricing is anchored to historical commodity values, converted to
+ * game dollars at an approximate rate of $1 ≈ 1 shilling.
+ *
+ * Tobacco: historically ranged from under 1 pence/lb (price crashes) to
+ * 2-3 shillings/lb in profitable early years, generally settling around
+ * 1-3 pence/lb through most of the colonial period. A game "unit" is
+ * ~100 lbs, so at ~2 pence/lb that's roughly $1.65/unit at the low end —
+ * but tobacco was THE high-value export, so we set the base at $12/unit
+ * to reflect its role as the primary cash crop and to keep gameplay
+ * rewarding. The high MARKET_VOLATILITY below reflects the documented
+ * extreme price swings (3 shillings/lb down to under 1 penny/lb).
+ * Source: Access Genealogy, "Tobacco Production, Trend of Prices, and Exports"
+ *
+ * Rice: Charleston wholesale prices ran 12-20 shillings/cwt (100 lbs) in
+ * 1701-1707, rising to 30-60+ shillings/cwt by the 1720s-30s. At ~15
+ * shillings/cwt early, that's about $0.15/lb, or ~$15/unit (100 lb unit).
+ * We set the base slightly below this at $10/unit to represent the
+ * earlier, lower end of the period range.
+ * Source: Historical Statistics of the United States, Table Eg299
+ *
+ * Corn: a subsistence crop, not a major export — kept low to reflect its
+ * role as provisioning rather than cash income.
+ *
+ * Indigo and Cowpeas/Sweet Potato: indigo becomes commercially significant
+ * later in the period; kept moderate. Cowpeas/sweet potatoes are
+ * subsistence crops with minimal market value, per GDD Section 7.1.
  */
 export const MARKET_BASE_PRICE: Partial<Record<CropType, number>> = {
-  [CropType.Tobacco]:     12,   // dollars per unit — high value, volatile
-  [CropType.Rice]:        8,
+  [CropType.Tobacco]:     12,   // primary cash crop — high value, volatile
+  [CropType.Rice]:        10,   // Charleston wholesale ~12-20 sh/cwt early period
   [CropType.Indigo]:      7,
-  [CropType.Corn]:        2,    // low value; mainly for provisioning
+  [CropType.Corn]:        2,    // subsistence crop; mainly for provisioning
   [CropType.Cowpeas]:     1,
   [CropType.SweetPotato]: 1,
 }

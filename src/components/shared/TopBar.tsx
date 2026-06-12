@@ -13,8 +13,12 @@ export default function TopBar() {
 
   if (!gameState) return null
 
-  const { currentSeason, currentYear, finances, workers } = gameState
+  const { currentSeason, currentYear, finances, workers, cornOnHand } = gameState
   const totalDebt = finances.factorAdvanceDebt + finances.mortgageDebt + finances.personalNoteDebt
+
+  // Corn upkeep is 1 unit per worker per season — warn when on hand
+  // covers less than one full season for the current workforce.
+  const cornLow = cornOnHand < workers.length
 
   return (
     <header className="bg-earth-800 border-b border-earth-700 px-4 py-3">
@@ -35,6 +39,11 @@ export default function TopBar() {
                 Debt: <span className="font-mono text-soil-poor">${totalDebt.toFixed(0)}</span>
               </span>
             )}
+            <span className="text-earth-400 text-xs">
+              Corn: <span className={`font-mono font-bold ${cornLow ? 'text-soil-poor' : 'text-earth-200'}`}>
+                {cornOnHand}
+              </span>
+            </span>
             <span className="text-earth-400 text-xs">
               Workers: <span className="font-mono text-earth-200">{workers.length}</span>
             </span>

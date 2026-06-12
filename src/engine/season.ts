@@ -71,7 +71,41 @@ export function resolveSeasonEnd(state: GameState): GameState {
   const weather = drawWeatherEvent(season)
   events.push(buildWeatherEvent(weather, season, year))
 
-  // ── Step 2: Update soil on all cleared tiles ──────────────────────────────
+  // ── Step 2: Land clearing progress ────────────────────────────────────────
+  // Tiles with workers assigned to ClearLand make progress toward being cleared.
+  // Each assigned worker contributes 1 labor-season toward clearingProgressRemaining.
+  const clearingWorkersByTile = countWorkersByTask(next.workers, 'ClearLand')
+
+  next.tiles = next.tiles.map(tile => {
+    if (tile.isCleared) return tile
+
+    const workersAssigned = clearingWorkersByTile.get(tile.id) ?? 0
+    if (workersAssigned === 0) return tile
+
+    const newRemaining = Math.max(0, tile.clearingProgressRemaining - workersAssigned)
+    const justCleared  = newRemaining === 0
+
+    if (justCleared) {
+      events.push({
+        id: generateId(), season, year,
+        category: 'Economic',
+        title: 'Land Cleared',
+        description: `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant.`,
+        effects: ['Tile available for planting next season'],
+      })
+    }
+
+    return {
+      ...tile,
+      clearingProgressRemaining: newRemaining,
+      isCleared: justCleared,
+      // Newly cleared forest/swamp tiles get stump rot
+      hasStumpRot: justCleared && tile.terrain !== 'Upland',
+      stumpRotSeasonsLeft: justCleared && tile.terrain !== 'Upland' ? 2 : tile.stumpRotSeasonsLeft,
+    }
+  })
+
+  // ── Step 3: Update soil on all cleared tiles ──────────────────────────────
   next.tiles = next.tiles.map(tile => {
     if (!tile.isCleared) return tile  // uncleared tiles don't change
 
@@ -107,75 +141,81 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }
   })
 
-  // ── Step 3: Compute harvests ──────────────────────────────────────────────
-  // In Autumn, planted crops are harvested (if not destroyed by early frost)
+  // ── Step 4: Compute harvests ──────────────────────────────────────────────
+  // Crops are harvested when a worker is assigned to HarvestCrop on that tile,
+  // regardless of season — this lets different crops with different grow
+  // seasons be harvested when ready, rather than forcing everything to Autumn.
   let harvestedCorn = 0
-  if (season === Season.Autumn) {
-    const frostDestroyed = weather === WeatherEvent.EarlyFrost
+  const harvestingWorkersByTile = countWorkersByTask(next.workers, 'HarvestCrop')
+  const frostDestroyed = season === Season.Autumn && weather === WeatherEvent.EarlyFrost
 
-    for (const tile of next.tiles) {
-      if (!tile.isCleared || !tile.currentCrop) continue
-      if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) continue
+  for (const tile of next.tiles) {
+    if (!tile.isCleared || !tile.currentCrop) continue
+    if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) continue
 
-      if (frostDestroyed) {
-        // Early frost destroys all unharvested crops
+    if (frostDestroyed) {
+      events.push({
+        id: generateId(), season, year,
+        category: 'Weather',
+        title: 'Early Frost — Crops Destroyed',
+        description: 'An early frost destroyed the unharvested crop on one of your fields.',
+        effects: ['Harvest lost on this tile'],
+      })
+      continue
+    }
+
+    const workersHarvesting = harvestingWorkersByTile.get(tile.id) ?? 0
+    if (workersHarvesting === 0) continue  // no one assigned to harvest — crop stays in field
+
+    const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
+    if (baseYield === 0) continue
+
+    // Soil and weather both affect final yield
+    const soilModifier    = computeYieldModifierFromSoil(tile.soil)
+    const weatherModifier = WEATHER_YIELD_MODIFIER[weather]
+
+    // Rice is destroyed by drought entirely
+    const isRiceDestroyedByDrought =
+      tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
+    if (isRiceDestroyedByDrought) continue
+
+    const yield_ = Math.floor(baseYield * soilModifier * weatherModifier)
+    if (yield_ <= 0) continue
+
+    // Corn goes directly to provisions; everything else goes to storage
+    if (tile.currentCrop === CropType.Corn) {
+      harvestedCorn += yield_
+    } else {
+      // Add to storage if capacity allows
+      const currentStored = getTotalStoredUnits(next.storage)
+      const spaceAvailable = next.storage.capacity - currentStored
+      const toStore = Math.min(yield_, spaceAvailable)
+
+      if (toStore > 0) {
+        next.storage.inventory[tile.currentCrop] =
+          (next.storage.inventory[tile.currentCrop] ?? 0) + toStore
+      }
+
+      if (toStore < yield_) {
         events.push({
           id: generateId(), season, year,
-          category: 'Weather',
-          title: 'Early Frost — Crops Destroyed',
-          description: 'An early frost destroyed the unharvested crop on one of your fields.',
-          effects: ['Harvest lost on this tile'],
+          category: 'Economic',
+          title: 'Storage Full — Crop Lost',
+          description: `Storage was full at harvest. ${yield_ - toStore} units of ${tile.currentCrop} were lost.`,
+          effects: [`${yield_ - toStore} units of ${tile.currentCrop} spoiled at harvest`],
         })
-        continue
-      }
-
-      const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
-      if (baseYield === 0) continue
-
-      // Soil and weather both affect final yield
-      const soilModifier    = computeYieldModifierFromSoil(tile.soil)
-      const weatherModifier = WEATHER_YIELD_MODIFIER[weather]
-
-      // Rice is destroyed by drought entirely
-      const isRiceDestroyedByDrought =
-        tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
-      if (isRiceDestroyedByDrought) continue
-
-      const yield_ = Math.floor(baseYield * soilModifier * weatherModifier)
-      if (yield_ <= 0) continue
-
-      // Corn goes directly to provisions; everything else goes to storage
-      if (tile.currentCrop === CropType.Corn) {
-        harvestedCorn += yield_
-      } else {
-        // Add to storage if capacity allows
-        const currentStored = getTotalStoredUnits(next.storage)
-        const spaceAvailable = next.storage.capacity - currentStored
-        const toStore = Math.min(yield_, spaceAvailable)
-
-        if (toStore > 0) {
-          next.storage.inventory[tile.currentCrop] =
-            (next.storage.inventory[tile.currentCrop] ?? 0) + toStore
-        }
-
-        if (toStore < yield_) {
-          events.push({
-            id: generateId(), season, year,
-            category: 'Economic',
-            title: 'Storage Full — Crop Lost',
-            description: `Storage was full at harvest. ${yield_ - toStore} units of ${tile.currentCrop} were lost.`,
-            effects: [`${yield_ - toStore} units of ${tile.currentCrop} spoiled at harvest`],
-          })
-        }
       }
     }
+
+    // Harvested tile becomes empty — ready for next planting
+    tile.currentCrop = null
   }
 
-  // Add harvested corn to provisions
-  // (In Phase 1 corn is tracked simply; Phase 2 will add full inventory)
-  const cornFromHarvest = harvestedCorn
+  // Add this season's harvested corn to the running provisions stockpile.
+  // Provisions persist across seasons — they are NOT reset to zero.
+  next.cornOnHand = (next.cornOnHand ?? 0) + harvestedCorn
 
-  // ── Step 4: Apply storage spoilage ───────────────────────────────────────
+  // ── Step 5: Apply storage spoilage ───────────────────────────────────────
   const { updatedStorage, spoilageReport } = applySpoilage(next.storage)
   next.storage = updatedStorage
 
@@ -192,7 +232,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
-  // ── Step 5: Process queued sales ──────────────────────────────────────────
+  // ── Step 6: Process queued sales ──────────────────────────────────────────
   const commissionRate = FINANCE_RATES.factorCommission.min +
     Math.random() * (FINANCE_RATES.factorCommission.max - FINANCE_RATES.factorCommission.min)
 
@@ -222,11 +262,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
-  // ── Step 6: Labor health changes ──────────────────────────────────────────
+  // ── Step 7: Labor health changes ──────────────────────────────────────────
   const healthResult = applySeasonalHealthChanges({
     workers:           next.workers,
     cabins:            next.cabins,
-    cornAvailable:     cornFromHarvest,
+    cornAvailable:     next.cornOnHand,
     blanketsAvailable: next.blanketsOnHand,
     season,
     weatherWasStorm:   weather === WeatherEvent.Storm,
@@ -237,16 +277,26 @@ export function resolveSeasonEnd(state: GameState): GameState {
     events.push({ ...e, id: generateId(), season, year })
   }
 
-  // ── Step 7: Pay upkeep ────────────────────────────────────────────────────
+  // ── Step 8: Pay upkeep ────────────────────────────────────────────────────
   const upkeepCheck = checkUpkeepRequirements({
     workerCount:    next.workers.length,
-    cornOnHand:     cornFromHarvest,
+    cornOnHand:     next.cornOnHand,
     cashOnHand:     next.finances.cashOnHand,
     blanketsOnHand: next.blanketsOnHand,
   })
 
   const cashUpkeep = next.workers.length * 1  // $1 clothing per worker
   next.finances.cashOnHand -= cashUpkeep
+
+  // Consume corn provisions for the season (1 unit per worker).
+  // If there's a shortfall, consume whatever is available — health
+  // consequences are handled by checkUpkeepRequirements/applySeasonalHealthChanges above.
+  const cornConsumed = Math.min(next.cornOnHand, next.workers.length)
+  next.cornOnHand -= cornConsumed
+
+  // Consume blanket provisions (0.25 per worker per season)
+  const blanketsConsumed = Math.min(next.blanketsOnHand, next.workers.length * 0.25)
+  next.blanketsOnHand -= blanketsConsumed
 
   if (!upkeepCheck.canMeetCorn) {
     events.push({
@@ -290,7 +340,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
-  // ── Step 8: Labor and resistance events ───────────────────────────────────
+  // ── Step 9: Labor and resistance events ───────────────────────────────────
   next.conditionsIndex = computeConditionsIndex(next.workers)
   const resistanceChance = getResistanceProbability(next.conditionsIndex)
 
@@ -317,10 +367,10 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }
   }
 
-  // ── Step 9: Generate new market prices for next season ────────────────────
+  // ── Step 10: Generate new market prices for next season ────────────────────
   next.market = generateSeasonalPrices(next.market, next.finances.factor.relationshipScore)
 
-  // ── Step 10: Check achievements ───────────────────────────────────────────
+  // ── Step 11: Check achievements ───────────────────────────────────────────
   const newTrophies = checkAchievements(next)
   for (const trophy of newTrophies) {
     next.trophies.push(trophy)
@@ -333,7 +383,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
-  // ── Step 11: Advance time ─────────────────────────────────────────────────
+  // ── Step 12: Advance time ─────────────────────────────────────────────────
   const { nextSeason, nextYear } = advanceSeason(season, year)
   next.currentSeason = nextSeason
   next.currentYear   = nextYear
@@ -402,6 +452,29 @@ function seasonIndex(season: Season): number {
 
 function getTotalStoredUnits(storage: { inventory: Partial<Record<CropType, number>> }): number {
   return Object.values(storage.inventory).reduce((sum, qty) => sum + (qty ?? 0), 0)
+}
+
+/**
+ * Counts how many workers are assigned to a given task type, grouped by tileId.
+ *
+ * Used to determine how much progress a tile makes this season for tasks
+ * like clearing or harvesting — each assigned worker contributes one
+ * labor-season toward the task.
+ *
+ * Only considers tasks that include a tileId (ClearLand, HarvestCrop, etc.)
+ */
+function countWorkersByTask(
+  workers: GameState['workers'],
+  taskType: 'ClearLand' | 'HarvestCrop' | 'TendCrop'
+): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const worker of workers) {
+    const task = worker.assignedTask
+    if (!task || task.type !== taskType) continue
+    if (!('tileId' in task)) continue
+    counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + 1)
+  }
+  return counts
 }
 
 function estimateAssetValue(state: GameState): number {
