@@ -388,6 +388,26 @@ export interface Trophy {
   earnedOnSeason: Season
 }
 
+/**
+ * A single financial transaction — any event that changes cashOnHand.
+ *
+ * Recorded for every cash-affecting action so the player can audit
+ * exactly why their balance changed: hires, land purchases, supply
+ * purchases, building costs, harvest sale revenue, factor commission,
+ * upkeep deductions, and debt interest accrual.
+ *
+ * runningBalance is the cashOnHand value AFTER this transaction —
+ * lets the Ledger UI show a running total without recomputing.
+ */
+export interface Transaction {
+  id:             string
+  season:         Season
+  year:           number
+  description:    string
+  amount:         number   // positive = income, negative = expense
+  runningBalance: number
+}
+
 // ---------------------------------------------------------------------------
 // GAME STATE — the complete save state
 // ---------------------------------------------------------------------------
@@ -433,6 +453,12 @@ export interface GameState {
   // depleted by worker upkeep each season (1 unit per worker per season)
   cornOnHand: number
 
+  // Cleared material (slash, stumps, brush) stockpile — generated when
+  // a Forest or Swamp tile finishes clearing. Can be applied to a tile
+  // as compost (see MANURE_APPLICATION_BOOST), consuming one unit per
+  // application. Upland clearing produces none (open meadow, no slash).
+  clearedMaterialOnHand: number
+
   // Aggregate welfare index for enslaved workers (0–100)
   // Derived from individual worker scores each season
   conditionsIndex: number
@@ -440,6 +466,7 @@ export interface GameState {
   // History
   eventLog:     GameEvent[]
   trophies:     Trophy[]
+  transactionLog: Transaction[]
 
   // Phase 1: simple soil model stand-in
   // Phase 2: replaced by the full four-value model already in Tile.soil

@@ -69,6 +69,35 @@ export default function Ledger() {
           />
         </div>
       </div>
+
+      {/* Transaction history */}
+      <div className="bg-earth-800 border border-earth-700 rounded p-4">
+        <h3 className="font-serif text-earth-200 text-sm mb-3">Transaction History</h3>
+        {gameState.transactionLog.length === 0 ? (
+          <p className="text-earth-500 text-xs italic">No transactions yet.</p>
+        ) : (
+          <div className="flex flex-col gap-1 max-h-96 overflow-y-auto">
+            {[...gameState.transactionLog].reverse().map(tx => (
+              <div key={tx.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-earth-800 last:border-0">
+                <div className="min-w-0 flex-1">
+                  <p className="text-earth-300 text-xs truncate">{tx.description}</p>
+                  <p className="text-earth-600 text-[10px]">{tx.season}, Year {tx.year}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  {tx.amount !== 0 && (
+                    <p className={`font-mono text-xs font-bold ${tx.amount > 0 ? 'text-soil-good' : 'text-soil-poor'}`}>
+                      {tx.amount > 0 ? '+' : ''}{tx.amount.toFixed(0)}
+                    </p>
+                  )}
+                  <p className="text-earth-500 text-[10px] font-mono">
+                    bal: ${tx.runningBalance.toFixed(0)}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

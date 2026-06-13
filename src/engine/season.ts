@@ -38,9 +38,13 @@ import {
   CROP_BASE_YIELD_PER_TILE,
   FINANCE_RATES,
   LABOR_UNITS_PER_WORKER_PER_SEASON,
+  CLEARED_MATERIAL_YIELD,
+  TEND_MITIGATION_PER_WORKER,
+  TEND_MAX_MITIGATION,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
+import { recordTransaction } from './transactions'
 import {
   applySeasonalHealthChanges,
   computeConditionsIndex,
@@ -90,11 +94,16 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const justCleared  = newRemaining === 0
 
     if (justCleared) {
+      const materialYield = CLEARED_MATERIAL_YIELD[tile.terrain]
+      next.clearedMaterialOnHand += materialYield
+
       events.push({
         id: generateId(), season, year,
         category: 'Economic',
         title: 'Land Cleared',
-        description: `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant.`,
+        description: materialYield > 0
+          ? `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant. ${materialYield} unit(s) of cleared material were collected and can be composted onto a field.`
+          : `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant.`,
         effects: ['Tile available for planting next season'],
       })
     }
@@ -110,13 +119,23 @@ export function resolveSeasonEnd(state: GameState): GameState {
   })
 
   // ── Step 3: Update soil on all cleared tiles ──────────────────────────────
+  // Tending mitigates the soil-damage portion of severe weather (drought's
+  // MR loss, storm's SF dip) — see TEND_MITIGATION_PER_WORKER in constants.ts.
+  const tendingWorkersByTile = countWorkersByTask(next.workers, 'TendCrop')
+
   next.tiles = next.tiles.map(tile => {
     if (!tile.isCleared) return tile  // uncleared tiles don't change
+
+    const tendingWorkers = tendingWorkersByTile.get(tile.id) ?? 0
+    const tendingMitigation = weather === WeatherEvent.Normal
+      ? 0
+      : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
 
     const updatedSoil = applySeasonalSoilUpdate(
       tile,
       weather,
-      false  // manure not implemented in Phase 1
+      false,  // manure not implemented in Phase 1
+      tendingMitigation
     )
 
     // Check soil for qualitative hints
@@ -174,9 +193,17 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
     if (baseYield === 0) continue
 
-    // Soil and weather both affect final yield
-    const soilModifier    = computeYieldModifierFromSoil(tile.soil)
-    const weatherModifier = WEATHER_YIELD_MODIFIER[weather]
+    // Soil and weather both affect final yield.
+    // Tending mitigates weather damage — see TEND_MITIGATION_PER_WORKER
+    // in constants.ts. Has no effect on Normal weather or EarlyFrost
+    // (frost destroys the crop outright before this point is reached).
+    const soilModifier = computeYieldModifierFromSoil(tile.soil)
+    const baseWeatherModifier = WEATHER_YIELD_MODIFIER[weather]
+    const tendingWorkers = tendingWorkersByTile.get(tile.id) ?? 0
+    const tendingMitigation = weather === WeatherEvent.Normal
+      ? 0
+      : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
+    const weatherModifier = Math.min(1.0, baseWeatherModifier + tendingMitigation)
 
     // Rice is destroyed by drought entirely
     const isRiceDestroyedByDrought =
@@ -264,6 +291,13 @@ export function resolveSeasonEnd(state: GameState): GameState {
       description: `Your factor executed ${saleResult.salesExecuted.length} sale(s): ${saleDesc}. Commission: $${saleResult.factorCommission.toFixed(0)}.`,
       effects: [`Revenue received: $${saleResult.revenue.toFixed(0)}`],
     })
+
+    next.transactionLog.push(recordTransaction({
+      description:   `Factor sale: ${saleDesc} (commission $${saleResult.factorCommission.toFixed(0)})`,
+      amount:        saleResult.revenue,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
   }
 
   // ── Step 7: Labor health changes ──────────────────────────────────────────
@@ -291,6 +325,15 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   const cashUpkeep = next.workers.length * 1  // $1 clothing per worker
   next.finances.cashOnHand -= cashUpkeep
+
+  if (cashUpkeep > 0) {
+    next.transactionLog.push(recordTransaction({
+      description:   `Worker clothing allowance (${next.workers.length} worker${next.workers.length !== 1 ? 's' : ''} × $1)`,
+      amount:        -cashUpkeep,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
 
   // Consume corn provisions for the season (1 unit per worker).
   // If there's a shortfall, consume whatever is available — health
@@ -327,9 +370,26 @@ export function resolveSeasonEnd(state: GameState): GameState {
   const mortgageInterestRate = FINANCE_RATES.landMortgagePerYear.min / 4  // quarterly
   const noteInterestRate = FINANCE_RATES.personalNotePerYear.min / 4
 
+  const factorInterestAccrued   = next.finances.factorAdvanceDebt * factorInterestRate
+  const mortgageInterestAccrued = next.finances.mortgageDebt * mortgageInterestRate
+  const noteInterestAccrued     = next.finances.personalNoteDebt * noteInterestRate
+
   next.finances.factorAdvanceDebt *= (1 + factorInterestRate)
   next.finances.mortgageDebt      *= (1 + mortgageInterestRate)
   next.finances.personalNoteDebt  *= (1 + noteInterestRate)
+
+  // Interest accrues onto the debt balance — it does not touch cashOnHand
+  // directly, but it's recorded in the transaction log (amount 0 cash
+  // change) so the player can see debt growing even when cash doesn't move.
+  const totalInterestAccrued = factorInterestAccrued + mortgageInterestAccrued + noteInterestAccrued
+  if (totalInterestAccrued > 0.01) {
+    next.transactionLog.push(recordTransaction({
+      description:   `Interest accrued on outstanding debt (+$${totalInterestAccrued.toFixed(2)} owed)`,
+      amount:        0,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
 
   // Check for foreclosure
   const totalDebt   = next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt

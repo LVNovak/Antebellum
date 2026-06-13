@@ -183,8 +183,38 @@ export const SOIL_DRAW_DOWN: Record<CropType, {
   [CropType.Fallow]:      { organicMatter: +2, nitrogen: +1, soilFauna: +3, moistureRetention: +2 },  // bare fallow
 }
 
-// Stump rot effect — applied for 1-2 seasons after clearing forested land
-export const STUMP_ROT_SOIL_FAUNA_PENALTY = -12  // suppresses SF while rot is active
+/**
+ * Stump rot effects — applied for 1-2 seasons after clearing forested
+ * or swamp land (Upland clearing is minimal and doesn't trigger this).
+ *
+ * Refined model (previously a single Soil Fauna penalty only):
+ *
+ * - Organic Matter: SLIGHT INCREASE. Decomposing slash, leaf litter,
+ *   and root fragments left behind by clearing add organic material
+ *   to the soil as they break down.
+ * - Nitrogen: SLIGHT DECREASE. Soil microbes consuming the fresh,
+ *   carbon-heavy woody debris temporarily draw down available
+ *   nitrogen to fuel their own growth — a well-documented effect
+ *   called "nitrogen immobilization."
+ * - Soil Fauna: DECREASE (the original effect, retained). Removing
+ *   the tree canopy and root network disrupts the soil structure
+ *   and microbial/fungal habitat that had developed under forest
+ *   cover. This is the dominant effect and the reason stump rot is
+ *   net-negative for yield even though OM ticks up slightly.
+ * - Moisture Retention: unaffected by stump rot itself (canopy loss's
+ *   moisture effect is handled separately by terrain/weather).
+ *
+ * Net effect: a newly cleared tile is NOT simply "bad soil" — it has
+ * decent raw organic material, but that material isn't yet accessible
+ * to crops because the soil biology that processes it has been
+ * disrupted. This resolves over STUMP_ROT_DURATION seasons as the
+ * microbial community re-establishes.
+ */
+export const STUMP_ROT_EFFECTS = {
+  organicMatter: +3,
+  nitrogen:      -2,
+  soilFauna:     -12,
+}
 export const STUMP_ROT_DURATION_MIN = 1
 export const STUMP_ROT_DURATION_MAX = 2
 
@@ -222,6 +252,29 @@ export const LAND_CLEARING_COST: Record<TerrainType, number> = {
   [TerrainType.Upland]: 1,   // open/meadow — minimal clearing needed
   [TerrainType.Forest]: 3,   // most common starting land
   [TerrainType.Swamp]:  8,   // requires drainage; highest cost
+}
+
+/**
+ * Cleared material (slash, stumps, brush) generated when a tile finishes
+ * clearing — a one-time yield, separate from the ongoing stump rot effect.
+ *
+ * Each unit of cleared material can be applied to a tile as compost via
+ * the "Compost cleared material" planner action, consuming one unit and
+ * applying MANURE_APPLICATION_BOOST to the chosen tile.
+ *
+ * Upland (open meadow) produces none — there's no significant woody
+ * material to clear. Forest produces a moderate amount; Swamp produces
+ * the most, reflecting the larger biomass of wetland vegetation.
+ *
+ * This connects land-clearing to the existing manure/compost mechanic
+ * (previously only reachable via the compost facility purchase) without
+ * introducing a separate timber economy — selling cleared material for
+ * cash is deferred to Phase 2+.
+ */
+export const CLEARED_MATERIAL_YIELD: Record<TerrainType, number> = {
+  [TerrainType.Upland]: 0,
+  [TerrainType.Forest]: 2,
+  [TerrainType.Swamp]:  3,
 }
 
 /**
@@ -505,6 +558,30 @@ export const WEATHER_YIELD_MODIFIER: Record<WeatherEvent, number> = {
   [WeatherEvent.Storm]:      0.70,   // -30% average; tobacco hit hardest
   [WeatherEvent.EarlyFrost]: 0.00,   // 0% — destroys all unharvested crops
 }
+
+/**
+ * Tending mitigation — how much a worker assigned to "Tend" reduces
+ * the weather penalty on that tile this season.
+ *
+ * Per GDD Section 2 (Cultivation phase): "Manage labor conditions,
+ * respond to weather/disease events, irrigate or treat fields." Tending
+ * represents active intervention — irrigating during drought, propping
+ * up storm-damaged plants, clearing standing water after heavy rain.
+ *
+ * Each tending worker closes part of the gap between the weather's
+ * yield modifier and 1.0 (no penalty). E.g. if Drought yield modifier
+ * is 0.45 and one worker tends with a 0.15 mitigation-per-worker rate,
+ * the effective modifier becomes 0.45 + 0.15 = 0.60 for that tile.
+ *
+ * Capped at TEND_MAX_MITIGATION total regardless of how many workers
+ * are assigned — tending helps, but can't fully cancel severe weather
+ * (a drought is still a drought even with extra hands).
+ *
+ * Has no effect on Normal weather (nothing to mitigate) or EarlyFrost
+ * (frost destroys the crop outright; tending can't prevent that).
+ */
+export const TEND_MITIGATION_PER_WORKER = 0.15
+export const TEND_MAX_MITIGATION        = 0.35  // up to ~3 workers' worth of benefit
 
 // ---------------------------------------------------------------------------
 // ACHIEVEMENTS — threshold values

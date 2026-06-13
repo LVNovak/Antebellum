@@ -29,7 +29,7 @@ import {
   SOIL_YIELD_WEIGHTS,
   SOIL_SINGLE_VALUE_WARNING_THRESHOLD,
   SOIL_EXHAUSTION_THRESHOLD,
-  STUMP_ROT_SOIL_FAUNA_PENALTY,
+  STUMP_ROT_EFFECTS,
   MANURE_APPLICATION_BOOST,
 } from './constants'
 
@@ -88,38 +88,58 @@ export function computeYieldModifier(soil: SoilHealth): number {
  *
  * Applies:
  *   1. Crop draw-down (or restoration if fallow/cover crop)
- *   2. Stump rot penalty if active
- *   3. Weather effects on soil
+ *   2. Stump rot effects if active
+ *   3. Weather effects on soil, reduced by tending mitigation
  *   4. Manure application if used this season
  *
  * All values are clamped to 0-100 after each update.
+ *
+ * @param tendingMitigation - 0 to TEND_MAX_MITIGATION. Reduces the
+ *   magnitude of NEGATIVE weather effects on soil (e.g. drought's MR
+ *   loss, storm's SF dip). Positive weather effects (e.g. heavy rain's
+ *   OM/MR boost) are unaffected — tending mitigates damage, it doesn't
+ *   suppress benefits.
  */
 export function applySeasonalSoilUpdate(
   tile: Tile,
   weather: WeatherEvent,
-  manureApplied: boolean
+  manureApplied: boolean,
+  tendingMitigation: number = 0
 ): SoilHealth {
   const soil = { ...tile.soil }  // copy — don't mutate the original
 
-  // Step 1: Apply crop draw-down (or fallow/cover restoration)
-  if (tile.currentCrop !== null) {
-    const drawDown = SOIL_DRAW_DOWN[tile.currentCrop]
-    soil.organicMatter     += drawDown.organicMatter
-    soil.nitrogen          += drawDown.nitrogen
-    soil.soilFauna         += drawDown.soilFauna
-    soil.moistureRetention += drawDown.moistureRetention
-  }
+  // Step 1: Apply crop draw-down (or fallow/cover restoration).
+  // A tile with no crop planted is treated as bare Fallow — leaving a
+  // field empty is a deliberate soil-recovery choice (per GDD Section
+  // 7.1's Fallow entry), not a neutral no-op. This makes "idle" land
+  // meaningfully different from "actively resting" land in name only —
+  // mechanically they're now the same, which is the correct behavior.
+  const effectiveCrop = tile.currentCrop ?? CropType.Fallow
+  const drawDown = SOIL_DRAW_DOWN[effectiveCrop]
+  soil.organicMatter     += drawDown.organicMatter
+  soil.nitrogen          += drawDown.nitrogen
+  soil.soilFauna         += drawDown.soilFauna
+  soil.moistureRetention += drawDown.moistureRetention
 
-  // Step 2: Stump rot — suppresses SF for 1-2 seasons after clearing
+  // Step 2: Stump rot — disrupted soil biology for 1-2 seasons after clearing.
+  // OM ticks up slightly (decomposing slash), N dips slightly (microbial
+  // immobilization), SF drops the most (disrupted soil structure/habitat).
+  // See constants.ts STUMP_ROT_EFFECTS for the full explanation.
   if (tile.hasStumpRot) {
-    soil.soilFauna += STUMP_ROT_SOIL_FAUNA_PENALTY
+    soil.organicMatter += STUMP_ROT_EFFECTS.organicMatter
+    soil.nitrogen      += STUMP_ROT_EFFECTS.nitrogen
+    soil.soilFauna     += STUMP_ROT_EFFECTS.soilFauna
   }
 
-  // Step 3: Weather effects on soil
-  soil.moistureRetention += WEATHER_SOIL_EFFECTS[weather].moistureRetention
-  soil.organicMatter     += WEATHER_SOIL_EFFECTS[weather].organicMatter
-  soil.nitrogen          += WEATHER_SOIL_EFFECTS[weather].nitrogen
-  soil.soilFauna         += WEATHER_SOIL_EFFECTS[weather].soilFauna
+  // Step 3: Weather effects on soil, with tending reducing negative
+  // effects only. A mitigation of 0.35 reduces a -20 effect to -13
+  // (a 35% reduction in magnitude), but leaves a +5 effect at +5.
+  const mitigationFactor = 1 - tendingMitigation
+  const weatherEffects = WEATHER_SOIL_EFFECTS[weather]
+  soil.moistureRetention += applyMitigation(weatherEffects.moistureRetention, mitigationFactor)
+  soil.organicMatter     += applyMitigation(weatherEffects.organicMatter, mitigationFactor)
+  soil.nitrogen          += applyMitigation(weatherEffects.nitrogen, mitigationFactor)
+  soil.soilFauna         += applyMitigation(weatherEffects.soilFauna, mitigationFactor)
 
   // Step 4: Manure application from compost facility improvement
   if (manureApplied) {
@@ -131,6 +151,14 @@ export function applySeasonalSoilUpdate(
 
   // Clamp all values to valid range 0-100
   return clampSoil(soil)
+}
+
+/**
+ * Reduces the magnitude of a negative effect by the mitigation factor;
+ * leaves positive effects (and zero) unchanged.
+ */
+function applyMitigation(effect: number, mitigationFactor: number): number {
+  return effect < 0 ? effect * mitigationFactor : effect
 }
 
 /**

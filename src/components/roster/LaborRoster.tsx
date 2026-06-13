@@ -123,10 +123,19 @@ function ConditionsIndexBar({ value }: { value: number }) {
 function WorkerCard({ worker }: { worker: Worker; [key: string]: unknown }) {
   const healthClass = getHealthColorClass(worker.health)
   const healthLabel = getHealthLabel(worker.health)
+  const releaseWorker = useGameStore(s => s.releaseWorker)
+  const [confirming, setConfirming] = useState(false)
+
+  const earlyContract = worker.contractSeasonsRemaining !== null && worker.contractSeasonsRemaining > 0
+
+  function handleReleaseClick() {
+    if (!confirming) { setConfirming(true); return }
+    releaseWorker(worker.id)
+  }
 
   return (
-    <div className="px-4 py-3 flex items-center justify-between">
-      <div>
+    <div className="px-4 py-3 flex items-center justify-between gap-2">
+      <div className="min-w-0">
         <div className="text-earth-100 text-sm font-bold">{worker.name}</div>
         <div className="text-earth-400 text-xs">
           Age {worker.age} · {worker.skill}
@@ -139,9 +148,33 @@ function WorkerCard({ worker }: { worker: Worker; [key: string]: unknown }) {
             Task: {formatTask(worker.assignedTask)}
           </div>
         )}
+        {confirming && (
+          <div className="text-xs mt-1">
+            <span className="text-soil-poor">
+              {worker.laborType === LaborType.EnslavedPurchased && 'Sell for ~$250 (loss vs. purchase price)? '}
+              {(worker.laborType === LaborType.IndenturedBlack || worker.laborType === LaborType.IndenturedWhite) && earlyContract && 'Releasing early costs $50 (contract dispute)? '}
+              {(worker.laborType === LaborType.IndenturedBlack || worker.laborType === LaborType.IndenturedWhite) && !earlyContract && 'Contract complete — release with no penalty? '}
+              {worker.laborType === LaborType.EnslavedHiredOut && 'End this hire-out arrangement? '}
+              {worker.laborType === LaborType.FreeWage && 'End this worker\'s employment? '}
+            </span>
+            <button onClick={() => setConfirming(false)} className="text-earth-500 underline ml-1">Cancel</button>
+          </div>
+        )}
       </div>
-      <div className={`text-xs font-bold ${healthClass}`}>
-        {healthLabel}
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <div className={`text-xs font-bold ${healthClass}`}>
+          {healthLabel}
+        </div>
+        <button
+          onClick={handleReleaseClick}
+          className={`text-[10px] px-2 py-0.5 rounded border ${
+            confirming
+              ? 'bg-red-900 border-red-700 text-red-200'
+              : 'bg-earth-700 border-earth-600 text-earth-400'
+          }`}
+        >
+          {confirming ? 'Confirm' : 'Release'}
+        </button>
       </div>
     </div>
   )

@@ -26,7 +26,12 @@ import {
   LAND_PARCEL_COST,
   WATER_ADJACENT_PRICE_PREMIUM,
   LABOR_ACQUISITION_COST,
+  LABOR_SEASONAL_COST,
   CABIN_BUILD_COST_MIN,
+  LABOR_UNITS_PER_WORKER_PER_SEASON,
+  LAND_CLEARING_COST,
+  CROP_LABOR_TO_PLANT,
+  CROP_LABOR_TO_HARVEST,
 } from '@engine/constants'
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
@@ -43,8 +48,20 @@ const LABOR_TYPE_LABELS: Record<LaborType, string> = {
   [LaborType.FreeWage]:          'Free Wage Laborer',
 }
 
-// Phase 1 crops only
-const PHASE1_CROPS: CropType[] = [CropType.Tobacco, CropType.Corn]
+// Plantable crops in Phase 1. Rice and Indigo are held back — Rice
+// requires water-adjacent tiles (the GDD's land-purchase system can
+// provide these, but the starting tile never is); Indigo is deferred
+// as lower-priority per the original Phase 1 scoping. Tobacco, Corn,
+// Cowpeas, Sweet Potato, and Cover Crop cover the core rotation loop
+// (cash crop, food crop, nitrogen-fixer, subsistence buffer, soil
+// restoration) without requiring water-adjacent land.
+const PLANTABLE_CROPS: CropType[] = [
+  CropType.Tobacco,
+  CropType.Corn,
+  CropType.Cowpeas,
+  CropType.SweetPotato,
+  CropType.CoverCrop,
+]
 
 const CROP_LABELS: Record<CropType, string> = {
   [CropType.Tobacco]:     'Tobacco',
@@ -55,6 +72,17 @@ const CROP_LABELS: Record<CropType, string> = {
   [CropType.Indigo]:      'Indigo',
   [CropType.CoverCrop]:   'Cover Crop',
   [CropType.Fallow]:      'Fallow (rest field)',
+}
+
+const CROP_DESCRIPTIONS: Record<CropType, string> = {
+  [CropType.Tobacco]:     'Cash crop. High value, depletes soil fastest.',
+  [CropType.Rice]:        'Cash crop. Requires water-adjacent land.',
+  [CropType.Corn]:        'Food crop. Feeds your workers — adds to provisions.',
+  [CropType.Cowpeas]:     'Nitrogen-fixer. Low value but restores soil nitrogen.',
+  [CropType.SweetPotato]: 'Food crop. Modest soil restoration, adds to provisions.',
+  [CropType.Indigo]:      'Cash crop. Moderate value.',
+  [CropType.CoverCrop]:   'No yield. Best all-around soil restoration — plant to recover an exhausted field.',
+  [CropType.Fallow]:      'No yield. Leave the field bare to rest and recover.',
 }
 
 export default function SeasonPlanner() {
@@ -70,15 +98,17 @@ export default function SeasonPlanner() {
   const queueSale            = useGameStore(s => s.queueSale)
   const buyLandParcel        = useGameStore(s => s.buyLandParcel)
   const hireWorker           = useGameStore(s => s.hireWorker)
+  const compostTile          = useGameStore(s => s.compostTile)
 
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
   const [saleQty,      setSaleQty]      = useState<Partial<Record<CropType, number>>>({})
   const [salePrice,    setSalePrice]    = useState<Partial<Record<CropType, number>>>({})
+  const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
 
   if (!gameState) return null
 
-  const { workers, tiles, storage, finances, cabins, currentSeason, currentYear } = gameState
+  const { workers, tiles, storage, finances, cabins, currentSeason, currentYear, clearedMaterialOnHand } = gameState
   const totalWorkers     = workers.length
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
@@ -113,9 +143,11 @@ export default function SeasonPlanner() {
   }
 
   function getTileDescription(tile: Tile): string {
-    if (!tile.isCleared) return `Uncleared — ${tile.clearingProgressRemaining} season(s) to clear`
+    if (!tile.isCleared) return `Uncleared — ${tile.clearingProgressRemaining.toFixed(1)} labor-unit(s) to clear`
+    if (tile.currentCrop === CropType.Fallow) return 'Fallow — resting and recovering'
+    if (tile.currentCrop === CropType.CoverCrop) return 'Cover crop — actively restoring soil'
     if (tile.currentCrop) return `Planted: ${CROP_LABELS[tile.currentCrop]}`
-    return 'Cleared — ready to plant'
+    return 'Empty — resting as fallow (soil recovering)'
   }
 
   function getAvailableActionsForTile(tile: Tile): TileAction['type'][] {
@@ -163,7 +195,7 @@ export default function SeasonPlanner() {
       // Default to the first available crop if none specified yet —
       // this lets the "Plant" button itself work on first click,
       // immediately revealing the crop selector.
-      const cropToUse = crop ?? PHASE1_CROPS[0]
+      const cropToUse = crop ?? PLANTABLE_CROPS[0]
       setTileAction(tile.id, { type: 'Plant', workers, crop: cropToUse })
     }
   }
@@ -192,6 +224,9 @@ export default function SeasonPlanner() {
 
         {/* Scrollable body */}
         <div className="flex-1 overflow-y-auto">
+
+          {/* ── LABOR REFERENCE ── */}
+          <LaborReference />
 
           {/* ── LAND TASKS ── */}
           <Section title="Land & Crops">
@@ -234,20 +269,25 @@ export default function SeasonPlanner() {
 
                   {/* Crop selector — shown when Plant is selected */}
                   {currentAction.type === 'Plant' && (
-                    <div className="flex flex-wrap gap-1 mb-2">
-                      {PHASE1_CROPS.map(crop => (
-                        <button
-                          key={crop}
-                          onClick={() => selectTileActionType(tile, 'Plant', crop)}
-                          className={`px-2 py-1 rounded text-xs border transition-colors ${
-                            selectedCrop === crop
-                              ? 'bg-earth-500 border-earth-300 text-earth-100'
-                              : 'bg-earth-800 border-earth-700 text-earth-400'
-                          }`}
-                        >
-                          {CROP_LABELS[crop]}
-                        </button>
-                      ))}
+                    <div className="mb-2">
+                      <div className="flex flex-wrap gap-1">
+                        {PLANTABLE_CROPS.map(crop => (
+                          <button
+                            key={crop}
+                            onClick={() => selectTileActionType(tile, 'Plant', crop)}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${
+                              selectedCrop === crop
+                                ? 'bg-earth-500 border-earth-300 text-earth-100'
+                                : 'bg-earth-800 border-earth-700 text-earth-400'
+                            }`}
+                          >
+                            {CROP_LABELS[crop]}
+                          </button>
+                        ))}
+                      </div>
+                      {selectedCrop && (
+                        <p className="text-earth-500 text-xs mt-1">{CROP_DESCRIPTIONS[selectedCrop]}</p>
+                      )}
                     </div>
                   )}
 
@@ -263,10 +303,32 @@ export default function SeasonPlanner() {
                       />
                     </div>
                   )}
+
+                  {/* Compost cleared material — shown on cleared tiles when material is available */}
+                  {tile.isCleared && clearedMaterialOnHand > 0 && (
+                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-earth-800">
+                      <span className="text-earth-400 text-xs">
+                        Compost cleared material onto this field
+                      </span>
+                      <button
+                        onClick={() => compostTile(tile.id)}
+                        className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs"
+                      >
+                        Apply (1 unit)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             })}
           </Section>
+
+          {/* Cleared material stockpile note */}
+          {clearedMaterialOnHand > 0 && (
+            <div className="px-4 py-2 bg-earth-800/30 text-earth-500 text-xs">
+              {clearedMaterialOnHand} unit(s) of cleared material in storage — apply to a field above to boost its soil.
+            </div>
+          )}
 
           {/* ── MAINTENANCE ── */}
           <Section title="Maintenance">
@@ -342,27 +404,47 @@ export default function SeasonPlanner() {
                 <p className="text-earth-200 text-sm font-bold mb-1">Hire Labor</p>
                 <p className="text-earth-500 text-xs mb-2">
                   {cabinSpaceAvailable > 0
-                    ? `${cabinSpaceAvailable} cabin slot(s) available.`
+                    ? `${cabinSpaceAvailable} cabin slot(s) available. Currently ${workers.length} worker(s).`
                     : `No cabin space — build a new cabin first ($${CABIN_BUILD_COST_MIN}+).`}
                 </p>
                 <div className="flex flex-col gap-1.5">
                   {(Object.keys(LABOR_TYPE_LABELS) as LaborType[]).map(laborType => {
                     const cost = LABOR_ACQUISITION_COST[laborType].min
+                    const seasonalCost = LABOR_SEASONAL_COST[laborType].min
                     const canAfford = finances.cashOnHand >= cost && cabinSpaceAvailable > 0
                     return (
                       <div key={laborType} className="flex items-center justify-between">
-                        <span className="text-earth-300 text-xs">{LABOR_TYPE_LABELS[laborType]}</span>
+                        <div className="flex flex-col">
+                          <span className="text-earth-300 text-xs">{LABOR_TYPE_LABELS[laborType]}</span>
+                          <span className="text-earth-600 text-[10px]">
+                            ~${seasonalCost}/season upkeep
+                          </span>
+                        </div>
                         <button
-                          onClick={() => hireWorker(laborType)}
+                          onClick={() => {
+                            const before = workers.length
+                            hireWorker(laborType)
+                            // Confirmation message — workers.length here is
+                            // pre-update (this render's snapshot), so we
+                            // describe the expected new total.
+                            setLastHireMessage(
+                              `Hired — now ${before + 1} worker(s) on the roster.`
+                            )
+                          }}
                           disabled={!canAfford}
                           className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
                         >
-                          {cost > 0 ? `$${cost}` : 'Hire'}
+                          {cost > 0 ? `Hire — $${cost}` : 'Hire'}
                         </button>
                       </div>
                     )
                   })}
                 </div>
+                {lastHireMessage && (
+                  <p className="text-soil-good text-xs mt-2 bg-earth-900 border border-earth-700 rounded px-2 py-1.5">
+                    ✓ {lastHireMessage}
+                  </p>
+                )}
               </div>
             </div>
           </Section>
@@ -501,6 +583,72 @@ export default function SeasonPlanner() {
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────
+
+// ── Labor reference panel ────────────────────────────────────────────────
+
+/**
+ * A collapsible reference explaining, in plain language, the labor
+ * math the player needs to plan effectively: parcel size, what one
+ * worker accomplishes per season for each task, and how long clearing
+ * takes. All numbers are pulled from constants.ts — this component
+ * is display-only and adds no new game logic.
+ */
+function LaborReference() {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div className="border-b border-earth-800">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full px-4 py-2 bg-earth-800/50 flex items-center justify-between text-left"
+      >
+        <span className="text-earth-400 text-xs font-bold uppercase tracking-wider">
+          How Labor Works
+        </span>
+        <span className="text-earth-500 text-xs">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="px-4 py-3 text-earth-400 text-xs space-y-2">
+          <p>
+            Each land parcel is roughly <strong className="text-earth-200">2-3 acres</strong> —
+            about what one worker can fully tend in a season.
+          </p>
+          <p>
+            <strong className="text-earth-200">Clearing:</strong> one worker clears
+            roughly <strong className="text-earth-200">{LABOR_UNITS_PER_WORKER_PER_SEASON}</strong> labor-unit(s)
+            per season. Forest needs {LAND_CLEARING_COST[TerrainType.Forest]} units total
+            (~{Math.ceil(LAND_CLEARING_COST[TerrainType.Forest] / LABOR_UNITS_PER_WORKER_PER_SEASON)} seasons with one worker),
+            Swamp needs {LAND_CLEARING_COST[TerrainType.Swamp]} units
+            (~{Math.ceil(LAND_CLEARING_COST[TerrainType.Swamp] / LABOR_UNITS_PER_WORKER_PER_SEASON)} seasons with one worker),
+            Upland needs only {LAND_CLEARING_COST[TerrainType.Upland]}.
+            Assign more workers to clear faster.
+          </p>
+          <p>
+            <strong className="text-earth-200">Planting &amp; Harvesting:</strong> most crops need{' '}
+            <strong className="text-earth-200">{CROP_LABOR_TO_PLANT[CropType.Tobacco]} worker</strong> to plant
+            and <strong className="text-earth-200">{CROP_LABOR_TO_HARVEST[CropType.Tobacco]} worker</strong> to
+            harvest a single parcel of Tobacco or Corn. Rice needs more —
+            {' '}{CROP_LABOR_TO_PLANT[CropType.Rice]} to plant and {CROP_LABOR_TO_HARVEST[CropType.Rice]} to harvest —
+            reflecting its much higher labor demands.
+          </p>
+          <p>
+            <strong className="text-earth-200">Tending:</strong> assigning a worker to "Tend" reduces
+            weather damage to that parcel this season. Each tending worker
+            offsets some of the penalty, up to a cap — tending helps in bad
+            weather but can't fully prevent crop loss in severe conditions.
+          </p>
+          <p>
+            <strong className="text-earth-200">Resting fields:</strong> a cleared parcel with nothing
+            planted automatically rests as Fallow, slowly recovering its
+            soil. Planting a Cover Crop recovers soil faster but yields
+            nothing that season.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (

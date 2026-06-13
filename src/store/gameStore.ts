@@ -23,8 +23,10 @@ import {
   HealthLevel,
   CabinCondition,
   TerrainType,
+  Transaction,
 } from '@engine/types'
 import { resolveSeasonEnd } from '@engine/season'
+import { recordTransaction } from '@engine/transactions'
 import {
   STORAGE_CAPACITY_NONE,
   STORAGE_CAPACITY_SMOKEHOUSE,
@@ -35,6 +37,7 @@ import {
   LABOR_SEASONAL_COST,
   STARTING_SOIL_BY_TERRAIN,
   LAND_CLEARING_COST,
+  MANURE_APPLICATION_BOOST,
 } from '@engine/constants'
 
 // ---------------------------------------------------------------------------
@@ -98,6 +101,12 @@ interface GameStore {
   // Land and labor acquisition
   buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
   hireWorker:             (laborType: LaborType) => void
+
+  // Soil management
+  compostTile:            (tileId: string) => void
+
+  // Labor release
+  releaseWorker:          (workerId: string) => void
 }
 
 interface NewGameParams {
@@ -264,7 +273,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const blanketCost = blankets * 3
     const totalCost   = cornCost + blanketCost
 
+    if (totalCost === 0) return  // nothing to buy
     if (gameState.finances.cashOnHand < totalCost) return  // can't afford
+
+    const newCash = gameState.finances.cashOnHand - totalCost
+    const parts: string[] = []
+    if (corn > 0)     parts.push(`${corn} corn`)
+    if (blankets > 0) parts.push(`${blankets} blanket${blankets !== 1 ? 's' : ''}`)
 
     const updated: GameState = {
       ...gameState,
@@ -272,8 +287,15 @@ export const useGameStore = create<GameStore>((set, get) => ({
       cornOnHand:     gameState.cornOnHand + corn,
       finances: {
         ...gameState.finances,
-        cashOnHand: gameState.finances.cashOnHand - totalCost,
+        cashOnHand: newCash,
       },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   `Bought supplies: ${parts.join(', ')}`,
+        amount:        -totalCost,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
     }
     set({ gameState: updated })
     saveToLocalStorage(updated)
@@ -286,13 +308,22 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (gameState.storage.capacity >= STORAGE_CAPACITY_SMOKEHOUSE) return // already built
     if (gameState.finances.cashOnHand < SMOKEHOUSE_BUILD_COST_MIN) return
 
+    const newCash = gameState.finances.cashOnHand - SMOKEHOUSE_BUILD_COST_MIN
+
     const updated: GameState = {
       ...gameState,
       storage: { ...gameState.storage, capacity: STORAGE_CAPACITY_SMOKEHOUSE },
       finances: {
         ...gameState.finances,
-        cashOnHand: gameState.finances.cashOnHand - SMOKEHOUSE_BUILD_COST_MIN,
+        cashOnHand: newCash,
       },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   'Built smokehouse (50-unit storage)',
+        amount:        -SMOKEHOUSE_BUILD_COST_MIN,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
     }
     set({ gameState: updated })
     saveToLocalStorage(updated)
@@ -348,10 +379,19 @@ export const useGameStore = create<GameStore>((set, get) => ({
       clearingProgressRemaining: LAND_CLEARING_COST[terrain],
     }
 
+    const newCash = gameState.finances.cashOnHand - totalCost
+
     const updated: GameState = {
       ...gameState,
       tiles: [...gameState.tiles, newTile],
-      finances: { ...gameState.finances, cashOnHand: gameState.finances.cashOnHand - totalCost },
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   `Bought ${terrain.toLowerCase()} parcel${isWaterAdjacent ? ' (water-adjacent)' : ''}`,
+        amount:        -totalCost,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
     }
     set({ gameState: updated })
     saveToLocalStorage(updated)
@@ -394,20 +434,137 @@ export const useGameStore = create<GameStore>((set, get) => ({
       }
     }
 
+    const newCash = gameState.finances.cashOnHand - acquisitionCost
+    const seasonalCost = LABOR_SEASONAL_COST[laborType].min
+
     const updated: GameState = {
       ...gameState,
       workers: [...gameState.workers, newWorker],
       cabins:  updatedCabins,
-      finances: { ...gameState.finances, cashOnHand: gameState.finances.cashOnHand - acquisitionCost },
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   acquisitionCost > 0
+          ? `Hired ${name} (${HIRE_LABOR_SHORT_LABELS[laborType]}) — ~$${seasonalCost}/season upkeep`
+          : `Hired ${name} (${HIRE_LABOR_SHORT_LABELS[laborType]}) — no purchase cost, ~$${seasonalCost}/season`,
+        amount:        -acquisitionCost,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Compost cleared material onto a tile ────────────────────────────────
+  compostTile: (tileId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (gameState.clearedMaterialOnHand < 1) return
+
+    const tile = gameState.tiles.find(t => t.id === tileId)
+    if (!tile || !tile.isCleared) return
+
+    const updatedTiles = gameState.tiles.map(t => {
+      if (t.id !== tileId) return t
+      return {
+        ...t,
+        soil: {
+          organicMatter:     Math.min(100, t.soil.organicMatter + MANURE_APPLICATION_BOOST.organicMatter),
+          nitrogen:          Math.min(100, t.soil.nitrogen + MANURE_APPLICATION_BOOST.nitrogen),
+          soilFauna:         Math.min(100, t.soil.soilFauna + MANURE_APPLICATION_BOOST.soilFauna),
+          moistureRetention: Math.min(100, t.soil.moistureRetention + MANURE_APPLICATION_BOOST.moistureRetention),
+        },
+      }
+    })
+
+    const updated: GameState = {
+      ...gameState,
+      tiles: updatedTiles,
+      clearedMaterialOnHand: gameState.clearedMaterialOnHand - 1,
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Release a worker ─────────────────────────────────────────────────────
+  releaseWorker: (workerId) => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    const worker = gameState.workers.find(w => w.id === workerId)
+    if (!worker) return
+
+    let cashDelta = 0
+    let description = ''
+
+    switch (worker.laborType) {
+      case LaborType.EnslavedPurchased:
+        // Sold back at a loss — half the liquidation value used in
+        // foreclosure assessment, reflecting a forced/quick sale.
+        cashDelta = 250
+        description = `Sold ${worker.name} (Enslaved, Purchased) — recovered $${cashDelta} at a loss`
+        break
+
+      case LaborType.EnslavedHiredOut:
+        // Rental simply ends — no transaction, seasonal cost just stops.
+        cashDelta = 0
+        description = `Ended hire-out arrangement for ${worker.name} (Enslaved, Hired-Out)`
+        break
+
+      case LaborType.IndenturedBlack:
+      case LaborType.IndenturedWhite: {
+        // Releasing before the contract term ends triggers a dispute
+        // penalty — the planter forfeits part of the original contract
+        // fee as a small cash cost.
+        const earlyRelease = (worker.contractSeasonsRemaining ?? 0) > 0
+        if (earlyRelease) {
+          cashDelta = -50
+          description = `Released ${worker.name} (Indentured) early — contract dispute cost $${Math.abs(cashDelta)}`
+        } else {
+          cashDelta = 0
+          description = `${worker.name}'s indenture contract has ended`
+        }
+        break
+      }
+
+      case LaborType.FreeWage:
+        // Employment simply ends — no transaction, seasonal wage stops.
+        cashDelta = 0
+        description = `Ended employment for ${worker.name} (Free Wage)`
+        break
+    }
+
+    if (cashDelta < 0 && gameState.finances.cashOnHand < Math.abs(cashDelta)) return  // can't afford the dispute cost
+
+    const newCash = gameState.finances.cashOnHand + cashDelta
+
+    // Remove worker from roster and any cabin occupancy
+    const updatedCabins = gameState.cabins.map(c => ({
+      ...c,
+      occupants: c.occupants.filter(id => id !== workerId),
+    }))
+
+    const updated: GameState = {
+      ...gameState,
+      workers: gameState.workers.filter(w => w.id !== workerId),
+      cabins:  updatedCabins,
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: cashDelta !== 0
+        ? [...gameState.transactionLog, recordTransaction({
+            description,
+            amount:        cashDelta,
+            newCashOnHand: newCash,
+            season:        gameState.currentSeason,
+            year:          gameState.currentYear,
+          })]
+        : gameState.transactionLog,
     }
     set({ gameState: updated })
     saveToLocalStorage(updated)
   },
 
 
-  dismissSeasonSummary: () => set({ showingSeasonSummary: false }),
-
-  // ── UI nav ────────────────────────────────────────────────────────────────
   setActivePanel: (panel) => set({ activePanel: panel }),
 
   // ── Save/load/reset ───────────────────────────────────────────────────────
@@ -489,6 +646,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     // Starting provisions: 8 units ≈ 4 seasons of food for 2 workers,
     // giving the player one year before corn becomes critical.
     cornOnHand:      8,
+    clearedMaterialOnHand: 0,
     conditionsIndex: 75,
     storage: {
       capacity:             STORAGE_CAPACITY_NONE,
@@ -507,7 +665,11 @@ function buildInitialGameState(params: NewGameParams): GameState {
       priceHistory: [],
     },
     finances: {
-      cashOnHand,
+      // Borrowed amounts (factor advance, personal note) are cash the
+      // player receives AND debt they owe — both sides of the loan
+      // must be recorded. Previously only the debt side was tracked,
+      // leaving the player with a liability but no corresponding asset.
+      cashOnHand: cashOnHand + factorAdvance + personalNote,
       factorAdvanceDebt: factorAdvance,
       mortgageDebt:      0,
       personalNoteDebt:  personalNote,
@@ -524,8 +686,58 @@ function buildInitialGameState(params: NewGameParams): GameState {
     useSimplifiedSoilModel: true,
     eventLog:  [],
     trophies:  [],
+    transactionLog: buildStartingTransactions(startingCapital, cashOnHand, factorAdvance, personalNote),
   }
 }
+
+/**
+ * Builds the initial transaction log entries showing the player's
+ * starting financial position — own cash plus any borrowed amount,
+ * with the loan obligation noted separately.
+ */
+function buildStartingTransactions(
+  capital: StartingCapital,
+  ownCash: number,
+  factorAdvance: number,
+  personalNote: number
+): Transaction[] {
+  const transactions: Transaction[] = []
+  let running = 0
+
+  running += ownCash
+  transactions.push(recordTransaction({
+    description:   `Starting capital (${capital})`,
+    amount:        ownCash,
+    newCashOnHand: running,
+    season:        Season.Spring,
+    year:          1,
+  }))
+
+  if (factorAdvance > 0) {
+    running += factorAdvance
+    transactions.push(recordTransaction({
+      description:   `Factor advance received — $${factorAdvance} owed back with interest`,
+      amount:        factorAdvance,
+      newCashOnHand: running,
+      season:        Season.Spring,
+      year:          1,
+    }))
+  }
+
+  if (personalNote > 0) {
+    running += personalNote
+    transactions.push(recordTransaction({
+      description:   `Personal note received — $${personalNote} owed back with interest`,
+      amount:        personalNote,
+      newCashOnHand: running,
+      season:        Season.Spring,
+      year:          1,
+    }))
+  }
+
+  return transactions
+}
+
 
 function buildGrantTile(origin: Origin) {
   const configs: Record<Origin, { isCleared: boolean; terrain: TerrainType }> = {
@@ -564,6 +776,16 @@ function buildCabin(id: string) {
 }
 
 const WORKER_NAMES = ['Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Tom', 'Hannah', 'Elias', 'Ruth']
+
+// Short labels used in transaction log descriptions (hire/release).
+// Full descriptive labels for the planner UI live in SeasonPlanner.tsx.
+const HIRE_LABOR_SHORT_LABELS: Record<LaborType, string> = {
+  [LaborType.EnslavedPurchased]: 'Enslaved, Purchased',
+  [LaborType.EnslavedHiredOut]:  'Enslaved, Hired-Out',
+  [LaborType.IndenturedBlack]:   'Indentured, Black',
+  [LaborType.IndenturedWhite]:   'Indentured, White',
+  [LaborType.FreeWage]:          'Free Wage',
+}
 
 function buildStartingWorker(id: string) {
   const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)]
