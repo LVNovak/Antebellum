@@ -564,6 +564,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
+  dismissSeasonSummary: () => set({ showingSeasonSummary: false }),
 
   setActivePanel: (panel) => set({ activePanel: panel }),
 
