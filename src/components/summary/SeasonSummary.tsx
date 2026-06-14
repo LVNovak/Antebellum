@@ -18,7 +18,7 @@ export default function SeasonSummary() {
   const previousYear   = gameState.currentSeason === 'Spring' ? gameState.currentYear - 1 : gameState.currentYear
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-40 flex items-end justify-center">
+    <div className="fixed inset-0 bg-black/80 z-40 flex items-end sm:items-center justify-center">
       <div className="bg-earth-900 border-t border-earth-700 w-full max-w-lg max-h-[80vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-earth-700 flex justify-between items-center">

@@ -503,6 +503,13 @@ export interface DebugEntry {
     yieldProduced:   number
   }>
 
+  cabins: Array<{
+    id:                          string
+    condition:                   string
+    occupants:                   number
+    receivedMaintenanceThisSeason: boolean
+  }>
+
   workers: Array<{
     id:     string
     name:   string

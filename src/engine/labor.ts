@@ -124,34 +124,44 @@ export function applySeasonalHealthChanges(params: {
   const blanketsPerWorker = provCount > 0 ? blanketsAvailable / provCount : 0
   const isColdSeason      = season === Season.Winter || season === Season.Autumn
 
-  // Map cabins by id for quick lookup — used by getWorkerProductivity callers
-  const _cabinById = new Map(cabins.map(c => [c.id, c]))  // available for Phase 2 expansion
+  // Map cabins by id for quick lookup
+  const _cabinById = new Map(cabins.map(c => [c.id, c]))
   void _cabinById
 
   const updatedWorkers: Worker[] = []
   const events: Omit<GameEvent, 'id' | 'season' | 'year'>[] = []
   let illnessOutbreakTriggered = false
 
+  // Workers whose provisions are the planter's responsibility
+  const PROVISION_TYPES = new Set([
+    LaborType.EnslavedPurchased,
+    LaborType.IndenturedBlack,
+    LaborType.IndenturedWhite,
+  ])
+
   for (const worker of workers) {
     let health = worker.health
 
+    const isProvisionWorker = PROVISION_TYPES.has(worker.laborType)
+
     // --- Factors that worsen health ---
 
-    const isHungry  = cornPerWorker < 1.0
-    const isCold    = isColdSeason && blanketsPerWorker < 0.25
-    const isResting = worker.assignedTask?.type === 'Rest'
+    // Hunger and cold only apply to workers the planter directly provisions.
+    // Hired-out and free wage workers provision themselves from their fee —
+    // if they're sick it's from working conditions, not the planter's stockpile.
+    const isHungry  = isProvisionWorker && cornPerWorker < 1.0
+    const isCold    = isProvisionWorker && isColdSeason && blanketsPerWorker < 0.25
 
     // Find which cabin this worker is in
     const cabin = cabins.find(c => c.occupants.includes(worker.id)) ?? null
 
-    const isOvercrowded = cabin !== null &&
-      cabin.occupants.length > CABIN_CAPACITY
+    const isOvercrowded = cabin !== null && cabin.occupants.length > CABIN_CAPACITY
 
     const hasBadHousing = cabin === null ||
       cabin.condition === CabinCondition.Poor ||
       cabin.condition === CabinCondition.Damaged
 
-    // Check for storm exposure — workers without adequate shelter take a hit
+    // Storm exposure — workers without adequate shelter take a hit
     const isStormExposed = weatherWasStorm && hasBadHousing
 
     // Count how many negative factors apply
@@ -159,26 +169,30 @@ export function applySeasonalHealthChanges(params: {
       .filter(Boolean).length
 
     if (stressFactors >= 3) {
-      // Multiple stressors: health declines one full level
       health = declineHealth(health)
     } else if (stressFactors >= 1) {
-      // Single stressor: health declines probabilistically
-      const declineChance = stressFactors * 0.25  // 25% per stressor
+      const declineChance = stressFactors * 0.25
       if (Math.random() < declineChance) {
         health = declineHealth(health)
       }
     }
 
-    // --- Disease spread check ---
-    if (cabin && health === HealthLevel.Sick || health === HealthLevel.VerySick) {
+    // --- Disease spread check with cooldown ---
+    // Illness can only fire once per resolution pass, and only if the
+    // worker is already sick (not just tired). This prevents the
+    // permanent illness cascade seen in playtesting.
+    if (health === HealthLevel.Sick || health === HealthLevel.VerySick) {
       const cabinConditionRiskMultiplier = cabin
         ? CABIN_CONDITION_DISEASE_RISK[cabin.condition]
         : CABIN_CONDITION_DISEASE_RISK[CabinCondition.Damaged]
 
-      const overcrowding = cabin ? Math.max(0, cabin.occupants.length - CABIN_CAPACITY) : 0
+      const overcrowding    = cabin ? Math.max(0, cabin.occupants.length - CABIN_CAPACITY) : 0
       const overcrowdingRisk = overcrowding * OVERCROWDING_DISEASE_RISK_PER_EXTRA
 
-      const spreadChance = DISEASE_SPREAD_BASE_CHANCE * cabinConditionRiskMultiplier + overcrowdingRisk
+      // Base spread chance significantly reduced — illness fired every season
+      // in playtesting because 4 VerySick workers each had independent rolls.
+      // Now: one event max per season, with reduced base probability.
+      const spreadChance = (DISEASE_SPREAD_BASE_CHANCE * 0.4) * cabinConditionRiskMultiplier + overcrowdingRisk
 
       if (Math.random() < spreadChance && !illnessOutbreakTriggered) {
         illnessOutbreakTriggered = true
@@ -186,18 +200,29 @@ export function applySeasonalHealthChanges(params: {
           category: 'Labor',
           title: 'Illness Outbreak',
           description: 'Sickness is spreading through the quarters. Several workers have fallen ill.',
-          effects: ['Labor productivity reduced this season', 'Provisioning costs may spike'],
+          effects: ['Labor productivity reduced this season'],
         })
       }
     }
 
     // --- Factors that improve health ---
 
-    const wellFed      = cornPerWorker >= 1.0
-    const wellCovered  = !isColdSeason || blanketsPerWorker >= 0.25
-    const goodHousing  = cabin !== null &&
+    // For provision workers: wellFed requires corn; wellCovered requires blankets.
+    // For hired-out/free wage: assume self-provisioned — they're always "fed"
+    // from their fee, so hunger/cold never block their recovery.
+    const wellFed     = isProvisionWorker ? cornPerWorker >= 1.0 : true
+    const wellCovered = isProvisionWorker ? (!isColdSeason || blanketsPerWorker >= 0.25) : true
+
+    const goodHousing = cabin !== null &&
       (cabin.condition === CabinCondition.Good || cabin.condition === CabinCondition.Fair)
-    const lightWorkload = isResting
+
+    // Light workload: rest OR any non-strenuous task (cabin repair, storage management)
+    // Previously only 'Rest' counted — meaning workers assigned to repair
+    // could never recover, leading to permanent VerySick cascades.
+    const lightWorkloadTasks = new Set(['Rest', 'RepairCabin', 'ManageStorage'])
+    const lightWorkload = worker.assignedTask
+      ? lightWorkloadTasks.has(worker.assignedTask.type)
+      : true  // unassigned = resting
 
     const recoveryFactors = [wellFed, wellCovered, goodHousing, lightWorkload]
       .filter(Boolean).length
@@ -206,8 +231,8 @@ export function applySeasonalHealthChanges(params: {
       // Good conditions: health improves one level
       health = improveHealth(health)
     } else if (stressFactors === 0 && recoveryFactors >= 2) {
-      // Adequate conditions: health improves probabilistically
-      if (Math.random() < 0.40) {
+      // Adequate conditions: 50% chance of improvement (up from 40%)
+      if (Math.random() < 0.50) {
         health = improveHealth(health)
       }
     }

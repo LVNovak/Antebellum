@@ -20,6 +20,7 @@
 import { useState } from 'react'
 import { useGameStore, SeasonPlan, TileAction, countAllocatedWorkers } from '@store/gameStore'
 import { CropType, Tile, TerrainType, LaborType } from '@engine/types'
+import { getTileDisplayLabel } from '@engine/tileUtils'
 import {
   STORAGE_CAPACITY_SMOKEHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
@@ -125,9 +126,19 @@ export default function SeasonPlanner() {
   const canAffordSupplies = finances.cashOnHand >= supplyCost
   const cabinSpaceAvailable = cabins.reduce((sum, c) => sum + c.capacity, 0) - workers.length
 
-  // Crops in storage that can be sold
+  // Crops in storage available to sell — subtract already-queued quantities
+  // so the player sees the true remaining sellable amount, not the stale total.
+  const queuedByType = finances.queuedSales.reduce((acc, sale) => {
+    acc[sale.crop] = (acc[sale.crop] ?? 0) + sale.quantity
+    return acc
+  }, {} as Partial<Record<CropType, number>>)
+
   const sellableCrops = Object.entries(storage.inventory)
-    .filter(([, qty]) => (qty ?? 0) > 0) as [CropType, number][]
+    .map(([crop, qty]) => {
+      const queued = queuedByType[crop as CropType] ?? 0
+      return [crop as CropType, Math.max(0, (qty ?? 0) - queued)] as [CropType, number]
+    })
+    .filter(([, qty]) => qty > 0)
 
   function handleBuySupplies() {
     if (cornToBuy > 0 || blanketsToBuy > 0) {
@@ -265,7 +276,7 @@ export default function SeasonPlanner() {
                   <div className="flex items-center justify-between mb-2">
                     <div>
                       <span className="text-earth-200 text-sm font-bold">
-                        {tile.terrain} Parcel
+                        {getTileDisplayLabel(tile)}
                       </span>
                       <span className="text-earth-500 text-xs ml-2">
                         {getTileDescription(tile)}

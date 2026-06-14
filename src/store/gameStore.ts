@@ -168,8 +168,12 @@ function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['work
   }
 
   // Cabin repair
+  // Distribute repair workers across all cabins evenly.
+  // Each cabin gets at least one worker if enough are assigned.
+  // Any remaining workers go to the first cabin.
+  const cabinIds = state.cabins.map(c => c.id)
   for (let i = 0; i < plan.cabinRepairWorkers; i++) {
-    const cabinId = 'cabin-1' // Phase 1: single cabin target
+    const cabinId = cabinIds[i % cabinIds.length] ?? 'cabin-1'
     assignments.push({ type: 'RepairCabin', cabinId })
   }
 

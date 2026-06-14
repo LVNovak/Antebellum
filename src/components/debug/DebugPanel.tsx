@@ -82,6 +82,17 @@ function DebugRow({ entry, isExpanded, onToggle }: { entry: DebugEntry; isExpand
             </div>
           </div>
           <div>
+            <p className="text-earth-400 font-bold mb-1">Cabins</p>
+            {entry.cabins.map(c => (
+              <div key={c.id} className="flex gap-2 text-earth-500 py-0.5 text-[10px]">
+                <span className="w-16 font-mono">{c.id}</span>
+                <span className={`w-16 ${c.condition === 'Poor' || c.condition === 'Damaged' ? 'text-soil-poor' : 'text-earth-400'}`}>{c.condition}</span>
+                <span>{c.occupants} occupant{c.occupants !== 1 ? 's' : ''}</span>
+                {c.receivedMaintenanceThisSeason && <span className="text-soil-good">✓ maintained</span>}
+              </div>
+            ))}
+          </div>
+          <div>
             <p className="text-earth-400 font-bold mb-1">Tiles (cleared only)</p>
             {entry.tiles.filter(t => t.isCleared).map(t => (
               <div key={t.id} className="flex items-center gap-2 text-earth-500 py-0.5">

@@ -123,9 +123,14 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }
   })
 
+  // Capture soil state BEFORE Step 3 updates it — used in debug log.
+  // Must be captured here, not inside the harvest loop, or it reflects
+  // post-update values (the bug that made soilBefore = soilAfter).
+  const soilSnapshots = new Map(
+    next.tiles.map(tile => [tile.id, { ...tile.soil }])
+  )
+
   // ── Step 3: Update soil on all cleared tiles ──────────────────────────────
-  // Tending mitigates the soil-damage portion of severe weather (drought's
-  // MR loss, storm's SF dip) — see TEND_MITIGATION_PER_WORKER in constants.ts.
   const tendingWorkersByTile = countWorkersByTask(next.workers, 'TendCrop')
 
   next.tiles = next.tiles.map(tile => {
@@ -174,11 +179,12 @@ export function resolveSeasonEnd(state: GameState): GameState {
   const harvestingWorkersByTile = countWorkersByTask(next.workers, 'HarvestCrop')
   const frostDestroyed = season === Season.Autumn && weather === WeatherEvent.EarlyFrost
 
-  // Collect debug data for each tile this season
   const debugTileData: DebugEntry['tiles'] = []
 
   for (const tile of next.tiles) {
-    const soilBefore = { ...tile.soil }
+    // Use pre-Step-3 snapshot for soilBefore — after Step 3 the soil
+    // has already been updated so tile.soil is already the post value.
+    const soilBefore = soilSnapshots.get(tile.id) ?? tile.soil
 
     if (!tile.isCleared || !tile.currentCrop) {
       debugTileData.push({
@@ -210,16 +216,23 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
     let yieldProduced = 0
 
-    if (frostDestroyed) {
+    const workersHarvesting = harvestingWorkersByTile.get(tile.id) ?? 0
+
+    // Early frost only destroys crops left standing in the field —
+    // tiles with harvest workers assigned are protected because the
+    // workers collect the crop before the frost hits.
+    // Player committed their harvest plan before advancing; frost is a
+    // consequence of NOT harvesting, not a random wipe of planned work.
+    if (frostDestroyed && workersHarvesting === 0) {
       events.push({
         id: generateId(), season, year,
         category: 'Weather',
         title: 'Early Frost — Crops Destroyed',
-        description: 'An early frost destroyed the unharvested crop on one of your fields.',
+        description: 'An early frost destroyed an unharvested crop on one of your fields.',
         effects: ['Harvest lost on this tile'],
       })
+      tile.currentCrop = null  // clear the destroyed crop
     } else {
-      const workersHarvesting = harvestingWorkersByTile.get(tile.id) ?? 0
       if (workersHarvesting > 0) {
         const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
         if (baseYield > 0) {
@@ -386,12 +399,15 @@ export function resolveSeasonEnd(state: GameState): GameState {
   const provisionWorkers = next.workers.filter(w => PROVISION_TYPES.has(w.laborType))
   const rentalWorkers    = next.workers.filter(w => RENTAL_TYPES.has(w.laborType))
 
-  // Clothing ($1/season) applies to ALL workers
-  const clothingUpkeep = next.workers.length * LABOR_UPKEEP.clothing
+  // Clothing ($1/season) applies only to workers the planter directly
+  // provisions — purchased enslaved and indentured. Hired-out and free
+  // wage workers' clothing is covered by their rental/wage fee.
+  const clothingWorkers = next.workers.filter(w => PROVISION_TYPES.has(w.laborType))
+  const clothingUpkeep = clothingWorkers.length * LABOR_UPKEEP.clothing
   next.finances.cashOnHand -= clothingUpkeep
   if (clothingUpkeep > 0) {
     next.transactionLog.push(recordTransaction({
-      description:   `Worker clothing allowance (${next.workers.length} × $${LABOR_UPKEEP.clothing})`,
+      description:   `Worker clothing allowance (${clothingWorkers.length} × $${LABOR_UPKEEP.clothing})`,
       amount:        -clothingUpkeep,
       newCashOnHand: next.finances.cashOnHand,
       season, year,
@@ -454,18 +470,32 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const isBeingRepaired = repairingWorkers.some(
       w => w.assignedTask?.type === 'RepairCabin' && (w.assignedTask as { cabinId: string }).cabinId === cabin.id
     )
-    if (isBeingRepaired) return cabin  // repair prevents decay this season
-
-    // Storm degrades by one tier immediately
-    // Neglect (no repair) degrades after 3 seasons — tracked via receivedMaintenanceThisSeason flag
-    if (weather === WeatherEvent.Storm && cabin.condition !== 'Damaged') {
-      return { ...cabin, condition: degradeCabinCondition(cabin.condition) }
+    if (isBeingRepaired) {
+      return { ...cabin, receivedMaintenanceThisSeason: true }
     }
 
-    // Seasonal neglect: without any upkeep work, Fair degrades slowly
-    // We use a simple probabilistic model: 33% chance of decay per neglected season
-    if (!cabin.receivedMaintenanceThisSeason && Math.random() < 0.33) {
-      return { ...cabin, condition: degradeCabinCondition(cabin.condition) }
+    if (weather === WeatherEvent.Storm && cabin.condition !== CabinCondition.Damaged) {
+      const newCondition = degradeCabinCondition(cabin.condition)
+      events.push({
+        id: generateId(), season, year,
+        category: 'Economic',
+        title: 'Cabin Storm Damage',
+        description: `Storm damaged a cabin — condition dropped from ${cabin.condition} to ${newCondition}.`,
+        effects: [`Cabin condition: ${newCondition}`],
+      })
+      return { ...cabin, condition: newCondition }
+    }
+
+    if (!cabin.receivedMaintenanceThisSeason && Math.random() < 0.10) {
+      const newCondition = degradeCabinCondition(cabin.condition)
+      events.push({
+        id: generateId(), season, year,
+        category: 'Economic',
+        title: 'Cabin Decay',
+        description: `A cabin has fallen into disrepair — condition dropped from ${cabin.condition} to ${newCondition}. Assign workers to repair it.`,
+        effects: [`Cabin condition: ${newCondition}`],
+      })
+      return { ...cabin, condition: newCondition }
     }
 
     return { ...cabin, receivedMaintenanceThisSeason: false }
@@ -577,6 +607,12 @@ export function resolveSeasonEnd(state: GameState): GameState {
     season, year,
     weather: weather as string,
     tiles: debugTileData,
+    cabins: next.cabins.map(c => ({
+      id:          c.id,
+      condition:   c.condition as string,
+      occupants:   c.occupants.length,
+      receivedMaintenanceThisSeason: c.receivedMaintenanceThisSeason,
+    })),
     workers: next.workers.map(w => ({
       id: w.id, name: w.name, type: w.laborType, health: w.health,
       task: w.assignedTask?.type ?? 'Unassigned',

@@ -22,6 +22,7 @@ import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
 import { Tile, CropType, TerrainType, Cabin, CabinCondition, Worker, Storage } from '@engine/types'
 import { getSoilColorCategory, getCompositeScore } from '@engine/soil'
+import { getTileDisplayLabel } from '@engine/tileUtils'
 import {
   STORAGE_CAPACITY_SMOKEHOUSE,
   STORAGE_CAPACITY_STOREHOUSE,
@@ -32,6 +33,7 @@ type SelectedItem =
   | { kind: 'tile';    id: string }
   | { kind: 'cabin';   id: string }
   | { kind: 'storage' }
+  | { kind: 'compost' }
   | null
 
 export default function PlantationMap() {
@@ -40,17 +42,18 @@ export default function PlantationMap() {
 
   if (!gameState) return null
 
-  const { tiles, cabins, storage, workers } = gameState
+  const { tiles, cabins, storage, workers, compostFacilityBuilt, clearedMaterialOnHand } = gameState
   const smokehouseBuilt = storage.capacity >= STORAGE_CAPACITY_SMOKEHOUSE
 
-  // Count workers currently assigned to clear each tile, for the
-  // "X seasons remaining" estimate shown on uncleared tiles.
+  // Count workers assigned to clear tiles and to tend compost
   const clearingWorkersByTile = new Map<string, number>()
+  let compostTenders = 0
   for (const w of workers) {
     const task = w.assignedTask
     if (task && task.type === 'ClearLand') {
       clearingWorkersByTile.set(task.tileId, (clearingWorkersByTile.get(task.tileId) ?? 0) + 1)
     }
+    if (task && task.type === 'ManageStorage') compostTenders++
   }
 
   return (
@@ -118,6 +121,16 @@ export default function PlantationMap() {
             />
           )}
 
+          {compostFacilityBuilt && (
+            <BuildingCard
+              icon="♻️"
+              label="Compost"
+              isSelected={selected?.kind === 'compost'}
+              accentColor={clearedMaterialOnHand > 0 ? 'border-soil-good' : 'border-earth-600'}
+              onTap={() => setSelected(selected?.kind === 'compost' ? null : { kind: 'compost' })}
+            />
+          )}
+
           {!smokehouseBuilt && (
             <div className="aspect-square rounded border-2 border-dashed border-earth-700 flex flex-col items-center justify-center text-earth-600 text-xs text-center p-1">
               <span className="text-xl">＋</span>
@@ -139,6 +152,12 @@ export default function PlantationMap() {
       )}
       {selected?.kind === 'storage' && (
         <StorageDetail storage={storage} />
+      )}
+      {selected?.kind === 'compost' && (
+        <CompostDetail
+          clearedMaterialOnHand={clearedMaterialOnHand}
+          compostTenders={compostTenders}
+        />
       )}
     </div>
   )
@@ -372,7 +391,40 @@ function StorageDetail({ storage }: { storage: Storage }) {
   )
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Compost detail panel ──────────────────────────────────────────────────
+
+function CompostDetail({ clearedMaterialOnHand, compostTenders }: {
+  clearedMaterialOnHand: number
+  compostTenders: number
+}) {
+  return (
+    <div className="bg-earth-800 border border-earth-700 rounded p-4 flex flex-col gap-3">
+      <h3 className="font-serif text-earth-100">Compost Facility</h3>
+      <div className="flex justify-between text-sm">
+        <span className="text-earth-400">Cleared material stockpile</span>
+        <span className={`font-mono font-bold ${clearedMaterialOnHand > 0 ? 'text-soil-good' : 'text-earth-500'}`}>
+          {clearedMaterialOnHand} unit{clearedMaterialOnHand !== 1 ? 's' : ''}
+        </span>
+      </div>
+      <div className="flex justify-between text-sm">
+        <span className="text-earth-400">Workers tending this season</span>
+        <span className="font-mono text-earth-200">{compostTenders}</span>
+      </div>
+      <p className="text-earth-500 text-xs">
+        {compostTenders > 0
+          ? `${compostTenders} worker${compostTenders !== 1 ? 's' : ''} can apply compost to ${compostTenders} parcel${compostTenders !== 1 ? 's' : ''} this season. Apply via Plan Season → Land & Crops.`
+          : 'Assign a worker to "Storage Management" in Plan Season to tend the compost operation.'}
+      </p>
+      {clearedMaterialOnHand === 0 && (
+        <p className="text-earth-600 text-xs italic">
+          No material to compost. Clear forest or swamp land to generate cleared material.
+        </p>
+      )}
+    </div>
+  )
+}
+
+
 
 /**
  * Converts remaining clearing labor-units into a human-readable estimate
@@ -391,20 +443,6 @@ const TERRAIN_ICONS: Record<TerrainType, string> = {
   [TerrainType.Forest]: '🌳',
   [TerrainType.Swamp]:  '🌾',
   [TerrainType.Upland]: '⬜',
-}
-
-const TERRAIN_LABELS: Record<TerrainType, string> = {
-  [TerrainType.Forest]: 'Forest (uncleared)',
-  [TerrainType.Swamp]:  'Wetland (uncleared)',
-  [TerrainType.Upland]: 'Upland (uncleared)',
-}
-
-// Once cleared, the original terrain type no longer matters to the player —
-// show current state instead. Terrain is still tracked internally for soil.
-function getTileDisplayLabel(tile: Tile): string {
-  if (!tile.isCleared) return TERRAIN_LABELS[tile.terrain]
-  if (tile.currentCrop) return `Field — ${tile.currentCrop}`
-  return 'Cleared Field'
 }
 
 const CROP_ICONS: Record<CropType, string> = {
