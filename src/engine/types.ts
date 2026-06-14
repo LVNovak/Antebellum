@@ -183,6 +183,9 @@ export interface Tile {
   // How many labor-seasons remain to finish clearing this tile
   // 0 means fully cleared
   clearingProgressRemaining: number
+
+  // Season-by-season harvest/fallow record for this tile
+  history: TileHistoryEntry[]
 }
 
 // ---------------------------------------------------------------------------
@@ -447,28 +450,93 @@ export interface GameState {
   finances:     Finances
 
   // Blanket supply — tracked separately as a physical supply item
-  blanketsOnHand: number  // each worker needs 0.25 per season (1 per year)
+  blanketsOnHand: number
 
-  // Corn provisions stockpile — accumulates from harvest and purchases,
-  // depleted by worker upkeep each season (1 unit per worker per season)
   cornOnHand: number
-
-  // Cleared material (slash, stumps, brush) stockpile — generated when
-  // a Forest or Swamp tile finishes clearing. Can be applied to a tile
-  // as compost (see MANURE_APPLICATION_BOOST), consuming one unit per
-  // application. Upland clearing produces none (open meadow, no slash).
   clearedMaterialOnHand: number
 
-  // Aggregate welfare index for enslaved workers (0–100)
-  // Derived from individual worker scores each season
+  // Seed inventory — simple Phase 1 model.
+  // Value of 1 = "have seeds for this crop"; 0/absent = need to buy.
+  // Phase 2 will replace with actual quantities consumed/yielded per tile.
+  seedInventory: Partial<Record<CropType, number>>
+
+  // Infrastructure flags
+  compostFacilityBuilt:    boolean  // required before cleared material can be applied
+  coverCropSeedStockOwned: boolean  // required before Cover Crop is plantable
+
   conditionsIndex: number
 
   // History
   eventLog:     GameEvent[]
   trophies:     Trophy[]
   transactionLog: Transaction[]
+  debugLog:     DebugEntry[]
 
-  // Phase 1: simple soil model stand-in
-  // Phase 2: replaced by the full four-value model already in Tile.soil
   useSimplifiedSoilModel: boolean
 }
+
+// ---------------------------------------------------------------------------
+// DEBUG LOG
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry per season. Captures full engine state at resolution time.
+ * Used for playtesting analysis — never shown to end users in production.
+ * Copy-to-clipboard as JSON via the Debug panel.
+ */
+export interface DebugEntry {
+  season:  Season
+  year:    number
+  weather: string
+
+  tiles: Array<{
+    id:              string
+    terrain:         string
+    isCleared:       boolean
+    crop:            string | null
+    soilBefore:      { om: number; n: number; sf: number; mr: number; composite: number }
+    soilAfter:       { om: number; n: number; sf: number; mr: number; composite: number }
+    workersClearing: number
+    workersPlanting: number
+    workersTending:  number
+    workersHarvesting: number
+    yieldProduced:   number
+  }>
+
+  workers: Array<{
+    id:     string
+    name:   string
+    type:   string
+    health: string
+    task:   string
+  }>
+
+  finances: {
+    cashStart:      number
+    cashEnd:        number
+    debtTotal:      number
+    salesRevenue:   number
+    upkeepClothing: number
+    upkeepRental:   number
+    upkeepInterest: number
+  }
+
+  events: string[]
+}
+
+// ---------------------------------------------------------------------------
+// TILE HISTORY
+// ---------------------------------------------------------------------------
+
+/**
+ * One entry per season a tile was harvested or deliberately left fallow.
+ * Shown in the tile detail panel as a season-by-season record.
+ */
+export interface TileHistoryEntry {
+  season:        Season
+  year:          number
+  crop:          CropType | null
+  yieldProduced: number
+  soilComposite: number  // 0-100 composite score that season
+}
+

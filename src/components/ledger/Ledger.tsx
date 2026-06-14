@@ -76,7 +76,7 @@ export default function Ledger() {
         {gameState.transactionLog.length === 0 ? (
           <p className="text-earth-500 text-xs italic">No transactions yet.</p>
         ) : (
-          <div className="flex flex-col gap-1 max-h-96 overflow-y-auto">
+          <div className="flex flex-col gap-1 max-h-96 overflow-y-auto pr-3">
             {[...gameState.transactionLog].reverse().map(tx => (
               <div key={tx.id} className="flex items-center justify-between gap-2 py-1.5 border-b border-earth-800 last:border-0">
                 <div className="min-w-0 flex-1">

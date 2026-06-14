@@ -95,9 +95,10 @@ export const CABIN_UPGRADE_COST_MAX = 800
 // ---------------------------------------------------------------------------
 
 export const LABOR_UPKEEP = {
-  corn:     1,     // units of corn per worker per season
-  clothing: 1,     // dollars per worker per season
-  blankets: 0.25,  // blankets per worker per season (1 per year)
+  corn:     1,      // units of corn per worker per season (purchased enslaved + indentured only)
+  clothing: 1,      // dollars per worker per season (all types)
+  blankets: 0.125,  // blankets per worker per season (1 every 2 years; purchased enslaved + indentured only)
+                    // GDD v0.5 correction: historical records show blankets issued every 1-3 years not annually
 }
 
 /**
@@ -173,14 +174,20 @@ export const SOIL_DRAW_DOWN: Record<CropType, {
   soilFauna:     number
   moistureRetention: number
 }> = {
-  [CropType.Tobacco]:     { organicMatter: -5, nitrogen: -8, soilFauna: -4, moistureRetention: -3 },
-  [CropType.Rice]:        { organicMatter: -2, nitrogen: -3, soilFauna: +1, moistureRetention:  0 },  // wetland irrigated
-  [CropType.Corn]:        { organicMatter: -3, nitrogen: -5, soilFauna: -2, moistureRetention: -1 },
-  [CropType.Cowpeas]:     { organicMatter: -1, nitrogen: +8, soilFauna: +2, moistureRetention: +1 },  // nitrogen fixer
-  [CropType.SweetPotato]: { organicMatter: -2, nitrogen: -3, soilFauna: +1, moistureRetention: +1 },
-  [CropType.Indigo]:      { organicMatter: -3, nitrogen: -5, soilFauna: -2, moistureRetention: -1 },
-  [CropType.CoverCrop]:   { organicMatter: +4, nitrogen: +5, soilFauna: +4, moistureRetention: +3 },  // best restoration
-  [CropType.Fallow]:      { organicMatter: +2, nitrogen: +1, soilFauna: +3, moistureRetention: +2 },  // bare fallow
+  // Depletion values halved from GDD v0.4 following playtesting —
+  // original values caused field exhaustion in ~1.5 years vs. historical
+  // 3-5 years. See GDD v0.5 Section 18 deviation log.
+  [CropType.Tobacco]:     { organicMatter: -2,  nitrogen: -4,  soilFauna: -2,  moistureRetention: -1  },
+  [CropType.Rice]:        { organicMatter: -2,  nitrogen: -3,  soilFauna: +1,  moistureRetention:  0  },  // wetland irrigated
+  [CropType.Corn]:        { organicMatter: -1,  nitrogen: -2,  soilFauna: -1,  moistureRetention: -0.5 },
+  [CropType.Cowpeas]:     { organicMatter: -1,  nitrogen: +8,  soilFauna: +2,  moistureRetention: +1  },  // nitrogen fixer
+  [CropType.SweetPotato]: { organicMatter: -1,  nitrogen: -1,  soilFauna: +1,  moistureRetention: +1  },
+  [CropType.Indigo]:      { organicMatter: -1,  nitrogen: -2,  soilFauna: -1,  moistureRetention: -0.5 },
+  // Restoration values scaled up so rotation is viable — fallow N was +1
+  // vs tobacco N draw of -8, requiring 8 fallow seasons per tobacco season.
+  // Now proportional: fallow restores ~1 season of tobacco damage per season.
+  [CropType.CoverCrop]:   { organicMatter: +6,  nitrogen: +8,  soilFauna: +6,  moistureRetention: +4  },
+  [CropType.Fallow]:      { organicMatter: +3,  nitrogen: +4,  soilFauna: +4,  moistureRetention: +3  },
 }
 
 /**
@@ -365,26 +372,56 @@ export const CROP_LABOR_TO_HARVEST: Record<CropType, number> = {
 }
 
 /**
- * Base units produced per tile at 100% soil yield modifier.
- * Actual yield = base * soil yield modifier * weather modifier.
+ * Base yield per tile at full soil health (composite modifier = 1.0).
+ * Actual yield = floor(base * soilModifier * weatherModifier).
  *
- * Tobacco: historical yield was ~1,000 lbs/acre on a 2-acre tile = ~2,000 lbs.
- * Game "units" are abstracted (1 unit ≈ 100 lbs) so base yield of 8 represents
- * roughly 800 lbs at full soil health — slightly below the historical average
- * to leave room for soil/weather bonuses to exceed the historical baseline.
- *
- * Corn: 6-7 barrels per worker historically. 1 game unit ≈ 1 barrel-equivalent.
+ * Scaled up 3x from GDD v0.4 to make unit economics viable at realistic
+ * soil health levels. At good soil (modifier ~0.75), tobacco yields
+ * 24 * 0.75 = 18 units ~ $216 gross before commission. With 4 workers
+ * on hire-out at $240/year this leaves a meaningful margin.
+ * At poor soil (modifier ~0.25) yield drops to 6 units = $72 gross,
+ * below the annual labor cost — creating the economic crisis that
+ * forces rotation.
  */
 export const CROP_BASE_YIELD_PER_TILE: Record<CropType, number> = {
-  [CropType.Tobacco]:     8,
-  [CropType.Rice]:        10,
-  [CropType.Corn]:        6,
-  [CropType.Cowpeas]:     4,
-  [CropType.SweetPotato]: 5,
-  [CropType.Indigo]:      6,
+  [CropType.Tobacco]:     24,
+  [CropType.Rice]:        30,
+  [CropType.Corn]:        18,
+  [CropType.Cowpeas]:     10,
+  [CropType.SweetPotato]: 12,
+  [CropType.Indigo]:      18,
   [CropType.CoverCrop]:   0,
   [CropType.Fallow]:      0,
 }
+
+/**
+ * Seed economy — Phase 1 simple model.
+ *
+ * SEED_PURCHASE_COST: one-time cost to acquire seed stock for a crop.
+ * After first purchase, seeds are perpetuated by harvest (Phase 1:
+ * having seeds is a boolean flag; Phase 2 will track quantities).
+ *
+ * Cover crop seed stock is a one-time infrastructure purchase that
+ * permanently unlocks cover cropping. Priced separately in the
+ * infrastructure table.
+ */
+export const SEED_PURCHASE_COST: Partial<Record<CropType, number>> = {
+  [CropType.Tobacco]:     15,   // small but meaningful first-season cost
+  [CropType.Corn]:        8,
+  [CropType.Cowpeas]:     6,
+  [CropType.SweetPotato]: 8,
+  [CropType.Indigo]:      12,
+  [CropType.Rice]:        20,   // specialty seed; expensive
+  // CoverCrop handled by COVER_CROP_SEED_STOCK_COST (infrastructure purchase)
+}
+
+// Cover crop seed stock — one-time infrastructure purchase
+export const COVER_CROP_SEED_STOCK_COST = 120  // midpoint of GDD $80-200 range
+
+// Compost facility — low-cost designated composting area
+export const COMPOST_FACILITY_COST = 75  // midpoint of GDD $50-100 range
+
+
 
 /**
  * Which crops can only be grown on water-adjacent tiles.

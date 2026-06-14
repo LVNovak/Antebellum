@@ -74,6 +74,29 @@ const ACHIEVEMENT_CHECKERS: AchievementChecker[] = [
     },
   },
 
+  // ── The Cotton King ───────────────────────────────────────────────────────
+  // Highest regional economic output for 3+ consecutive years.
+  // Measured by total stored crop value + cash on hand relative to debt.
+  // In Phase 1 this triggers when the player accumulates a large cash surplus
+  // over multiple years — a proxy for dominant regional output.
+  {
+    id:   'the-cotton-king',
+    name: 'The Cotton King',
+    conditionText: 'Achieved dominant economic output for three or more consecutive years.',
+    check: (state) => {
+      const netWorth = state.finances.cashOnHand
+        + Object.entries(state.storage.inventory).reduce((sum, [crop, qty]) => {
+            return sum + (qty ?? 0) * (state.market.prices[crop as import('./types').CropType] ?? 0)
+          }, 0)
+        - state.finances.factorAdvanceDebt
+        - state.finances.mortgageDebt
+        - state.finances.personalNoteDebt
+      // Proxy: net worth > $2,000 after Year 3 (tunable in ACHIEVEMENT_THRESHOLDS)
+      return state.currentYear >= ACHIEVEMENT_THRESHOLDS.topOutputConsecutiveYears + 1
+        && netWorth > 2000
+    },
+  },
+
   // ── The Ruin ─────────────────────────────────────────────────────────────
   {
     id:   'the-ruin',

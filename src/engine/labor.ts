@@ -107,18 +107,21 @@ export interface LaborHealthResult {
  * Returns updated workers and any events triggered (illness outbreak, etc.)
  */
 export function applySeasonalHealthChanges(params: {
-  workers:          Worker[]
-  cabins:           Cabin[]
-  cornAvailable:    number     // total corn units available this season
-  blanketsAvailable: number
-  season:           Season
-  weatherWasStorm:  boolean
+  workers:              Worker[]
+  cabins:               Cabin[]
+  cornAvailable:        number
+  blanketsAvailable:    number
+  season:               Season
+  weatherWasStorm:      boolean
+  provisionWorkerCount?: number  // workers whose provisions are the planter's responsibility
 }): LaborHealthResult {
-  const { workers, cabins, cornAvailable, blanketsAvailable, season, weatherWasStorm } = params
+  const { workers, cabins, cornAvailable, blanketsAvailable, season, weatherWasStorm, provisionWorkerCount } = params
 
-  // Figure out how much provision each worker actually gets
-  const cornPerWorker     = workers.length > 0 ? cornAvailable     / workers.length : 0
-  const blanketsPerWorker = workers.length > 0 ? blanketsAvailable / workers.length : 0
+  // Figure out how much provision each provisionable worker actually gets.
+  // Hired-out and free wage workers don't draw from the planter's stockpile.
+  const provCount = provisionWorkerCount ?? workers.length
+  const cornPerWorker     = provCount > 0 ? cornAvailable     / provCount : 0
+  const blanketsPerWorker = provCount > 0 ? blanketsAvailable / provCount : 0
   const isColdSeason      = season === Season.Winter || season === Season.Autumn
 
   // Map cabins by id for quick lookup — used by getWorkerProductivity callers

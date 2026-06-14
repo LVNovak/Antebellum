@@ -218,7 +218,7 @@ function TileDetail({ tile, workersClearingThisTile }: { tile: Tile; workersClea
   return (
     <div className="bg-earth-800 border border-earth-700 rounded p-4 flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-serif text-earth-100">{TERRAIN_LABELS[tile.terrain]}</h3>
+        <h3 className="font-serif text-earth-100">{getTileDisplayLabel(tile)}</h3>
         {tile.isCleared && (
           <span className={`text-xs px-2 py-0.5 rounded ${SOIL_BADGE_CLASSES[soilColor]}`}>
             Soil: {soilColor.charAt(0).toUpperCase() + soilColor.slice(1)}
@@ -272,6 +272,24 @@ function TileDetail({ tile, workersClearingThisTile }: { tile: Tile; workersClea
 
       {tile.isWaterAdjacent && (
         <p className="text-earth-400 text-xs">Water-adjacent — suitable for rice.</p>
+      )}
+
+      {/* Yield history */}
+      {tile.history && tile.history.length > 0 && (
+        <div>
+          <p className="text-earth-400 text-xs font-bold mb-1">Field History</p>
+          <div className="flex flex-col gap-0.5 max-h-32 overflow-y-auto">
+            {[...tile.history].reverse().map((entry, i) => (
+              <div key={i} className="flex items-center justify-between text-[10px]">
+                <span className="text-earth-500">{entry.season}, Yr {entry.year}</span>
+                <span className="text-earth-400">{entry.crop ?? 'Fallow'}</span>
+                <span className="text-earth-300 font-mono">
+                  {entry.yieldProduced > 0 ? `${entry.yieldProduced} units` : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )
@@ -376,9 +394,17 @@ const TERRAIN_ICONS: Record<TerrainType, string> = {
 }
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
-  [TerrainType.Forest]: 'Forest Parcel',
-  [TerrainType.Swamp]:  'Wetland Parcel',
-  [TerrainType.Upland]: 'Upland Parcel',
+  [TerrainType.Forest]: 'Forest (uncleared)',
+  [TerrainType.Swamp]:  'Wetland (uncleared)',
+  [TerrainType.Upland]: 'Upland (uncleared)',
+}
+
+// Once cleared, the original terrain type no longer matters to the player —
+// show current state instead. Terrain is still tracked internally for soil.
+function getTileDisplayLabel(tile: Tile): string {
+  if (!tile.isCleared) return TERRAIN_LABELS[tile.terrain]
+  if (tile.currentCrop) return `Field — ${tile.currentCrop}`
+  return 'Cleared Field'
 }
 
 const CROP_ICONS: Record<CropType, string> = {

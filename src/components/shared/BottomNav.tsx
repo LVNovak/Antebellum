@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { id: 'ledger',   label: 'Ledger',  icon: '📒' },
   { id: 'market',   label: 'Market',  icon: '⚖️' },
   { id: 'trophies', label: 'Trophies',icon: '🏆' },
+  { id: 'debug',    label: 'Debug',   icon: '🔍' },
 ] as const
 
 export default function BottomNav() {

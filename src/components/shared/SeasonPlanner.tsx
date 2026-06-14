@@ -32,6 +32,9 @@ import {
   LAND_CLEARING_COST,
   CROP_LABOR_TO_PLANT,
   CROP_LABOR_TO_HARVEST,
+  SEED_PURCHASE_COST,
+  COMPOST_FACILITY_COST,
+  COVER_CROP_SEED_STOCK_COST,
 } from '@engine/constants'
 
 const TERRAIN_LABELS: Record<TerrainType, string> = {
@@ -99,6 +102,10 @@ export default function SeasonPlanner() {
   const buyLandParcel        = useGameStore(s => s.buyLandParcel)
   const hireWorker           = useGameStore(s => s.hireWorker)
   const compostTile          = useGameStore(s => s.compostTile)
+  const buySeeds             = useGameStore(s => s.buySeeds)
+  const buildCompostFacility = useGameStore(s => s.buildCompostFacility)
+  const buyCoverCropSeedStock = useGameStore(s => s.buyCoverCropSeedStock)
+  const clearTileField        = useGameStore(s => s.clearTileField)
 
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
@@ -108,7 +115,12 @@ export default function SeasonPlanner() {
 
   if (!gameState) return null
 
-  const { workers, tiles, storage, finances, cabins, currentSeason, currentYear, clearedMaterialOnHand } = gameState
+  const {
+    workers, tiles, storage, finances, cabins,
+    currentSeason, currentYear,
+    clearedMaterialOnHand, seedInventory,
+    compostFacilityBuilt, coverCropSeedStockOwned,
+  } = gameState
   const totalWorkers     = workers.length
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
@@ -150,10 +162,27 @@ export default function SeasonPlanner() {
     return 'Empty — resting as fallow (soil recovering)'
   }
 
+  // Only show plantable crops for which the player has seeds.
+  // CoverCrop additionally requires coverCropSeedStockOwned flag.
+  const availableCrops = [
+    CropType.Tobacco,
+    CropType.Corn,
+    CropType.Cowpeas,
+    CropType.SweetPotato,
+    CropType.CoverCrop,
+  ].filter(crop => {
+    if (crop === CropType.CoverCrop) return coverCropSeedStockOwned
+    return (seedInventory?.[crop] ?? 0) > 0
+  })
+
   function getAvailableActionsForTile(tile: Tile): TileAction['type'][] {
     if (!tile.isCleared) return ['Clear']
-    if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) return ['Tend', 'Idle']
-    if (tile.currentCrop) return ['Tend', 'Harvest', 'Idle']
+    // Planted tile — allow tending, harvesting, or clearing the field
+    // "ClearField" removes the crop without harvesting (cover crops, bad harvests)
+    if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) {
+      return ['Tend', 'ClearField', 'Idle']
+    }
+    if (tile.currentCrop) return ['Tend', 'Harvest', 'ClearField', 'Idle']
     return ['Plant', 'Idle']
   }
 
@@ -177,7 +206,6 @@ export default function SeasonPlanner() {
       return
     }
 
-    // Preserve the current action type when adjusting count
     if (action.type === 'Clear')   setTileAction(tile.id, { type: 'Clear',   workers: newCount })
     if (action.type === 'Tend')    setTileAction(tile.id, { type: 'Tend',    workers: newCount })
     if (action.type === 'Harvest') setTileAction(tile.id, { type: 'Harvest', workers: newCount })
@@ -187,15 +215,17 @@ export default function SeasonPlanner() {
 
   function selectTileActionType(tile: Tile, actionType: TileAction['type'], crop?: CropType) {
     if (actionType === 'Idle') { setTileAction(tile.id, { type: 'Idle' }); return }
+    // ClearField is handled immediately in the store — no labor allocated
+    if (actionType === 'ClearField') {
+      clearTileField(tile.id)
+      return
+    }
     const workers = getWorkerCountForTile(tile.id) || 1
     if (actionType === 'Clear')   setTileAction(tile.id, { type: 'Clear',   workers })
     if (actionType === 'Tend')    setTileAction(tile.id, { type: 'Tend',    workers })
     if (actionType === 'Harvest') setTileAction(tile.id, { type: 'Harvest', workers })
     if (actionType === 'Plant') {
-      // Default to the first available crop if none specified yet —
-      // this lets the "Plant" button itself work on first click,
-      // immediately revealing the crop selector.
-      const cropToUse = crop ?? PLANTABLE_CROPS[0]
+      const cropToUse = crop ?? (availableCrops[0] ?? CropType.Tobacco)
       setTileAction(tile.id, { type: 'Plant', workers, crop: cropToUse })
     }
   }
@@ -271,7 +301,7 @@ export default function SeasonPlanner() {
                   {currentAction.type === 'Plant' && (
                     <div className="mb-2">
                       <div className="flex flex-wrap gap-1">
-                        {PLANTABLE_CROPS.map(crop => (
+                        {availableCrops.length > 0 ? availableCrops.map(crop => (
                           <button
                             key={crop}
                             onClick={() => selectTileActionType(tile, 'Plant', crop)}
@@ -283,7 +313,9 @@ export default function SeasonPlanner() {
                           >
                             {CROP_LABELS[crop]}
                           </button>
-                        ))}
+                        )) : (
+                          <p className="text-soil-poor text-xs">No seeds available — buy seeds in the Supplies section below.</p>
+                        )}
                       </div>
                       {selectedCrop && (
                         <p className="text-earth-500 text-xs mt-1">{CROP_DESCRIPTIONS[selectedCrop]}</p>
@@ -481,25 +513,85 @@ export default function SeasonPlanner() {
             </div>
           </Section>
 
-          {/* ── BUILD ── */}
-          {!smokehouseBuilt && (
-            <Section title="Build">
-              <div className="px-4 py-3 flex items-center justify-between">
-                <div>
-                  <span className="text-earth-200 text-sm font-bold">Smokehouse</span>
-                  <p className="text-earth-500 text-xs">Unlocks 50-unit crop storage. Required to sell crops.</p>
-                  <p className="text-earth-400 text-xs mt-0.5">Cost: ${SMOKEHOUSE_BUILD_COST_MIN}</p>
+          {/* ── BUILD & SEEDS ── */}
+          <Section title="Build & Seeds">
+            <div className="px-4 py-3 space-y-4">
+
+              {/* Smokehouse */}
+              {!smokehouseBuilt && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-earth-200 text-sm font-bold">Smokehouse</span>
+                    <p className="text-earth-500 text-xs">Unlocks 50-unit crop storage. Required to sell crops.</p>
+                    <p className="text-earth-400 text-xs">${SMOKEHOUSE_BUILD_COST_MIN}</p>
+                  </div>
+                  <button onClick={buildSmokehouse} disabled={!canAffordSmokehouse}
+                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40">
+                    {canAffordSmokehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
+                  </button>
                 </div>
-                <button
-                  onClick={buildSmokehouse}
-                  disabled={!canAffordSmokehouse}
-                  className="px-4 py-2 bg-earth-600 border border-earth-500 text-earth-100 rounded text-sm disabled:opacity-40"
-                >
-                  {canAffordSmokehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
-                </button>
+              )}
+
+              {/* Compost facility */}
+              {!compostFacilityBuilt && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-earth-200 text-sm font-bold">Compost Facility</span>
+                    <p className="text-earth-500 text-xs">Enables composting cleared material onto fields. 1 worker tends the whole operation.</p>
+                    <p className="text-earth-400 text-xs">${COMPOST_FACILITY_COST}</p>
+                  </div>
+                  <button onClick={buildCompostFacility}
+                    disabled={finances.cashOnHand < COMPOST_FACILITY_COST}
+                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40">
+                    {finances.cashOnHand >= COMPOST_FACILITY_COST ? 'Build' : `Need $${COMPOST_FACILITY_COST}`}
+                  </button>
+                </div>
+              )}
+
+              {/* Cover crop seed stock */}
+              {!coverCropSeedStockOwned && (
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-earth-200 text-sm font-bold">Cover Crop Seed Stock</span>
+                    <p className="text-earth-500 text-xs">One-time purchase. Unlocks cover cropping permanently — best all-round soil restoration.</p>
+                    <p className="text-earth-400 text-xs">${COVER_CROP_SEED_STOCK_COST}</p>
+                  </div>
+                  <button onClick={buyCoverCropSeedStock}
+                    disabled={finances.cashOnHand < COVER_CROP_SEED_STOCK_COST}
+                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40">
+                    {finances.cashOnHand >= COVER_CROP_SEED_STOCK_COST ? 'Buy' : `Need $${COVER_CROP_SEED_STOCK_COST}`}
+                  </button>
+                </div>
+              )}
+
+              {/* Seed buying */}
+              <div>
+                <p className="text-earth-300 text-sm font-bold mb-1">Buy Seeds</p>
+                <p className="text-earth-500 text-xs mb-2">Seeds required before planting. Harvest perpetuates your supply.</p>
+                <div className="flex flex-col gap-1.5">
+                  {([CropType.Tobacco, CropType.Corn, CropType.Cowpeas, CropType.SweetPotato] as CropType[]).map(crop => {
+                    const cost = SEED_PURCHASE_COST[crop] ?? 0
+                    const owned = (seedInventory?.[crop] ?? 0) > 0
+                    return (
+                      <div key={crop} className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-earth-300 text-xs">{CROP_LABELS[crop]}</span>
+                          {owned && <span className="text-soil-good text-[10px]">✓ have seeds</span>}
+                        </div>
+                        <button
+                          onClick={() => buySeeds(crop)}
+                          disabled={owned || finances.cashOnHand < cost}
+                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                        >
+                          {owned ? 'Owned' : `$${cost}`}
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
-            </Section>
-          )}
+            </div>
+          </Section>
 
           {/* ── SELL ── */}
           {sellableCrops.length > 0 && (

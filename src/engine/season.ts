@@ -30,6 +30,9 @@ import {
   Season,
   WeatherEvent,
   CropType,
+  LaborType,
+  DebugEntry,
+  TileHistoryEntry,
 } from './types'
 
 import {
@@ -41,6 +44,8 @@ import {
   CLEARED_MATERIAL_YIELD,
   TEND_MITIGATION_PER_WORKER,
   TEND_MAX_MITIGATION,
+  LABOR_UPKEEP,
+  LABOR_SEASONAL_COST,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
@@ -165,16 +170,45 @@ export function resolveSeasonEnd(state: GameState): GameState {
   })
 
   // ── Step 4: Compute harvests ──────────────────────────────────────────────
-  // Crops are harvested when a worker is assigned to HarvestCrop on that tile,
-  // regardless of season — this lets different crops with different grow
-  // seasons be harvested when ready, rather than forcing everything to Autumn.
   let harvestedCorn = 0
   const harvestingWorkersByTile = countWorkersByTask(next.workers, 'HarvestCrop')
   const frostDestroyed = season === Season.Autumn && weather === WeatherEvent.EarlyFrost
 
+  // Collect debug data for each tile this season
+  const debugTileData: DebugEntry['tiles'] = []
+
   for (const tile of next.tiles) {
-    if (!tile.isCleared || !tile.currentCrop) continue
-    if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) continue
+    const soilBefore = { ...tile.soil }
+
+    if (!tile.isCleared || !tile.currentCrop) {
+      debugTileData.push({
+        id: tile.id, terrain: tile.terrain, isCleared: tile.isCleared,
+        crop: tile.currentCrop,
+        soilBefore: snapSoil(soilBefore),
+        soilAfter:  snapSoil(tile.soil),
+        workersClearing:   clearingWorkersByTile.get(tile.id) ?? 0,
+        workersPlanting:   0,
+        workersTending:    tendingWorkersByTile.get(tile.id) ?? 0,
+        workersHarvesting: harvestingWorkersByTile.get(tile.id) ?? 0,
+        yieldProduced: 0,
+      })
+      continue
+    }
+    if (tile.currentCrop === CropType.Fallow || tile.currentCrop === CropType.CoverCrop) {
+      debugTileData.push({
+        id: tile.id, terrain: tile.terrain, isCleared: tile.isCleared,
+        crop: tile.currentCrop,
+        soilBefore: snapSoil(soilBefore),
+        soilAfter:  snapSoil(tile.soil),
+        workersClearing: 0, workersPlanting: 0,
+        workersTending:  tendingWorkersByTile.get(tile.id) ?? 0,
+        workersHarvesting: 0,
+        yieldProduced: 0,
+      })
+      continue
+    }
+
+    let yieldProduced = 0
 
     if (frostDestroyed) {
       events.push({
@@ -184,66 +218,80 @@ export function resolveSeasonEnd(state: GameState): GameState {
         description: 'An early frost destroyed the unharvested crop on one of your fields.',
         effects: ['Harvest lost on this tile'],
       })
-      continue
-    }
-
-    const workersHarvesting = harvestingWorkersByTile.get(tile.id) ?? 0
-    if (workersHarvesting === 0) continue  // no one assigned to harvest — crop stays in field
-
-    const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
-    if (baseYield === 0) continue
-
-    // Soil and weather both affect final yield.
-    // Tending mitigates weather damage — see TEND_MITIGATION_PER_WORKER
-    // in constants.ts. Has no effect on Normal weather or EarlyFrost
-    // (frost destroys the crop outright before this point is reached).
-    const soilModifier = computeYieldModifierFromSoil(tile.soil)
-    const baseWeatherModifier = WEATHER_YIELD_MODIFIER[weather]
-    const tendingWorkers = tendingWorkersByTile.get(tile.id) ?? 0
-    const tendingMitigation = weather === WeatherEvent.Normal
-      ? 0
-      : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
-    const weatherModifier = Math.min(1.0, baseWeatherModifier + tendingMitigation)
-
-    // Rice is destroyed by drought entirely
-    const isRiceDestroyedByDrought =
-      tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
-    if (isRiceDestroyedByDrought) continue
-
-    const yield_ = Math.floor(baseYield * soilModifier * weatherModifier)
-    if (yield_ <= 0) continue
-
-    // Corn goes directly to provisions; everything else goes to storage
-    if (tile.currentCrop === CropType.Corn) {
-      harvestedCorn += yield_
     } else {
-      // Add to storage if capacity allows
-      const currentStored = getTotalStoredUnits(next.storage)
-      const spaceAvailable = next.storage.capacity - currentStored
-      const toStore = Math.min(yield_, spaceAvailable)
+      const workersHarvesting = harvestingWorkersByTile.get(tile.id) ?? 0
+      if (workersHarvesting > 0) {
+        const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
+        if (baseYield > 0) {
+          const soilModifier = computeYieldModifierFromSoil(tile.soil)
+          const baseWeatherModifier = WEATHER_YIELD_MODIFIER[weather]
+          const tendingWorkers = tendingWorkersByTile.get(tile.id) ?? 0
+          const tendingMitigation = weather === WeatherEvent.Normal
+            ? 0
+            : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
+          const weatherModifier = Math.min(1.0, baseWeatherModifier + tendingMitigation)
 
-      if (toStore > 0) {
-        next.storage.inventory[tile.currentCrop] =
-          (next.storage.inventory[tile.currentCrop] ?? 0) + toStore
-      }
+          const isRiceDestroyedByDrought = tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
 
-      if (toStore < yield_) {
-        events.push({
-          id: generateId(), season, year,
-          category: 'Economic',
-          title: 'Storage Full — Crop Lost',
-          description: `Storage was full at harvest. ${yield_ - toStore} units of ${tile.currentCrop} were lost.`,
-          effects: [`${yield_ - toStore} units of ${tile.currentCrop} spoiled at harvest`],
-        })
+          if (!isRiceDestroyedByDrought) {
+            yieldProduced = Math.floor(baseYield * soilModifier * weatherModifier)
+
+            if (yieldProduced > 0) {
+              if (tile.currentCrop === CropType.Corn || tile.currentCrop === CropType.SweetPotato) {
+                harvestedCorn += yieldProduced
+              } else {
+                const currentStored = getTotalStoredUnits(next.storage)
+                const spaceAvailable = next.storage.capacity - currentStored
+                const toStore = Math.min(yieldProduced, spaceAvailable)
+
+                if (toStore > 0) {
+                  next.storage.inventory[tile.currentCrop] =
+                    (next.storage.inventory[tile.currentCrop] ?? 0) + toStore
+                }
+                if (toStore < yieldProduced) {
+                  events.push({
+                    id: generateId(), season, year,
+                    category: 'Economic',
+                    title: 'Storage Full — Crop Lost',
+                    description: `Storage was full at harvest. ${yieldProduced - toStore} units of ${tile.currentCrop} were lost.`,
+                    effects: [`${yieldProduced - toStore} units of ${tile.currentCrop} spoiled at harvest`],
+                  })
+                }
+              }
+
+              // Phase 1 seed model: harvesting perpetuates seed stock for this crop
+              // (farmer always saves seed from harvest — no quantity tracking yet)
+              if (!next.seedInventory) next.seedInventory = {}
+              next.seedInventory[tile.currentCrop] = 1
+            }
+          }
+        }
+        // Harvested tile becomes empty
+        tile.currentCrop = null
       }
     }
 
-    // Harvested tile becomes empty — ready for next planting
-    tile.currentCrop = null
+    // Record tile history entry
+    const historyEntry: TileHistoryEntry = {
+      season, year,
+      crop:          tile.currentCrop ?? (yieldProduced > 0 ? null : tile.currentCrop),
+      yieldProduced,
+      soilComposite: Math.round(computeYieldModifierFromSoil(tile.soil) * 100),
+    }
+    tile.history = [...(tile.history ?? []), historyEntry]
+
+    debugTileData.push({
+      id: tile.id, terrain: tile.terrain, isCleared: tile.isCleared,
+      crop: tile.currentCrop,
+      soilBefore: snapSoil(soilBefore),
+      soilAfter:  snapSoil(tile.soil),
+      workersClearing: 0, workersPlanting: 0,
+      workersTending:  tendingWorkersByTile.get(tile.id) ?? 0,
+      workersHarvesting: harvestingWorkersByTile.get(tile.id) ?? 0,
+      yieldProduced,
+    })
   }
 
-  // Add this season's harvested corn to the running provisions stockpile.
-  // Provisions persist across seasons — they are NOT reset to zero.
   next.cornOnHand = (next.cornOnHand ?? 0) + harvestedCorn
 
   // ── Step 5: Apply storage spoilage ───────────────────────────────────────
@@ -308,6 +356,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
     blanketsAvailable: next.blanketsOnHand,
     season,
     weatherWasStorm:   weather === WeatherEvent.Storm,
+    provisionWorkerCount: next.workers.filter(w =>
+      w.laborType === LaborType.EnslavedPurchased ||
+      w.laborType === LaborType.IndenturedBlack ||
+      w.laborType === LaborType.IndenturedWhite
+    ).length,
   })
 
   next.workers = healthResult.updatedWorkers
@@ -316,59 +369,123 @@ export function resolveSeasonEnd(state: GameState): GameState {
   }
 
   // ── Step 8: Pay upkeep ────────────────────────────────────────────────────
-  const upkeepCheck = checkUpkeepRequirements({
-    workerCount:    next.workers.length,
-    cornOnHand:     next.cornOnHand,
-    cashOnHand:     next.finances.cashOnHand,
-    blanketsOnHand: next.blanketsOnHand,
-  })
+  // Provisions (corn, blankets) only apply to workers whose upkeep is the
+  // planter's direct responsibility: purchased enslaved and indentured.
+  // Hired-out enslaved and free wage workers provision themselves — their
+  // cost is captured in the rental/wage fee below.
+  const PROVISION_TYPES = new Set([
+    LaborType.EnslavedPurchased,
+    LaborType.IndenturedBlack,
+    LaborType.IndenturedWhite,
+  ])
+  const RENTAL_TYPES = new Set([
+    LaborType.EnslavedHiredOut,
+    LaborType.FreeWage,
+  ])
 
-  const cashUpkeep = next.workers.length * 1  // $1 clothing per worker
-  next.finances.cashOnHand -= cashUpkeep
+  const provisionWorkers = next.workers.filter(w => PROVISION_TYPES.has(w.laborType))
+  const rentalWorkers    = next.workers.filter(w => RENTAL_TYPES.has(w.laborType))
 
-  if (cashUpkeep > 0) {
+  // Clothing ($1/season) applies to ALL workers
+  const clothingUpkeep = next.workers.length * LABOR_UPKEEP.clothing
+  next.finances.cashOnHand -= clothingUpkeep
+  if (clothingUpkeep > 0) {
     next.transactionLog.push(recordTransaction({
-      description:   `Worker clothing allowance (${next.workers.length} worker${next.workers.length !== 1 ? 's' : ''} × $1)`,
-      amount:        -cashUpkeep,
+      description:   `Worker clothing allowance (${next.workers.length} × $${LABOR_UPKEEP.clothing})`,
+      amount:        -clothingUpkeep,
       newCashOnHand: next.finances.cashOnHand,
       season, year,
     }))
   }
 
-  // Consume corn provisions for the season (1 unit per worker).
-  // If there's a shortfall, consume whatever is available — health
-  // consequences are handled by checkUpkeepRequirements/applySeasonalHealthChanges above.
-  const cornConsumed = Math.min(next.cornOnHand, next.workers.length)
-  next.cornOnHand -= cornConsumed
+  // Corn provisions — purchased enslaved and indentured only
+  const cornNeeded  = provisionWorkers.length * LABOR_UPKEEP.corn
+  const cornConsumed = Math.min(next.cornOnHand, cornNeeded)
+  next.cornOnHand  -= cornConsumed
+  const cornShortfall = Math.max(0, cornNeeded - cornConsumed)
 
-  // Consume blanket provisions (0.25 per worker per season)
-  const blanketsConsumed = Math.min(next.blanketsOnHand, next.workers.length * 0.25)
-  next.blanketsOnHand -= blanketsConsumed
+  // Blanket provisions — purchased enslaved and indentured only
+  const blanketsNeeded   = provisionWorkers.length * LABOR_UPKEEP.blankets
+  const blanketsConsumed = Math.min(next.blanketsOnHand, blanketsNeeded)
+  next.blanketsOnHand   -= blanketsConsumed
 
-  if (!upkeepCheck.canMeetCorn) {
+  if (cornShortfall > 0) {
     events.push({
       id: generateId(), season, year,
       category: 'Labor',
       title: 'Corn Shortage',
-      description: `You are ${upkeepCheck.cornShortfall} units of corn short of feeding your workforce. Worker health will decline.`,
+      description: `You are ${cornShortfall.toFixed(0)} unit(s) of corn short of feeding your workforce. Worker health will decline.`,
       effects: ['Labor health declining this season'],
     })
   }
 
-  if (!upkeepCheck.canMeetCash) {
+  // Rental and wage fees — hired-out enslaved and free wage workers
+  let totalRentalCost = 0
+  for (const worker of rentalWorkers) {
+    const fee = LABOR_SEASONAL_COST[worker.laborType].min
+    totalRentalCost += fee
+  }
+  if (totalRentalCost > 0) {
+    next.finances.cashOnHand -= totalRentalCost
+    next.transactionLog.push(recordTransaction({
+      description:   `Labor rental/wage fees (${rentalWorkers.length} worker${rentalWorkers.length !== 1 ? 's' : ''})`,
+      amount:        -totalRentalCost,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
+
+  // Housing upkeep — $6/cabin/season (Phase 1 simplification; GDD v0.5 Section 6.3)
+  const cabinUpkeep = next.cabins.length * 6
+  next.finances.cashOnHand -= cabinUpkeep
+  if (cabinUpkeep > 0) {
+    next.transactionLog.push(recordTransaction({
+      description:   `Cabin upkeep (${next.cabins.length} cabin${next.cabins.length !== 1 ? 's' : ''} × $6)`,
+      amount:        -cabinUpkeep,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
+
+  // Cabin condition decay — cabins degrade without active repair
+  // Workers assigned RepairCabin task prevent decay on that cabin
+  const repairingWorkers = next.workers.filter(w => w.assignedTask?.type === 'RepairCabin')
+  next.cabins = next.cabins.map(cabin => {
+    const isBeingRepaired = repairingWorkers.some(
+      w => w.assignedTask?.type === 'RepairCabin' && (w.assignedTask as { cabinId: string }).cabinId === cabin.id
+    )
+    if (isBeingRepaired) return cabin  // repair prevents decay this season
+
+    // Storm degrades by one tier immediately
+    // Neglect (no repair) degrades after 3 seasons — tracked via receivedMaintenanceThisSeason flag
+    if (weather === WeatherEvent.Storm && cabin.condition !== 'Damaged') {
+      return { ...cabin, condition: degradeCabinCondition(cabin.condition) }
+    }
+
+    // Seasonal neglect: without any upkeep work, Fair degrades slowly
+    // We use a simple probabilistic model: 33% chance of decay per neglected season
+    if (!cabin.receivedMaintenanceThisSeason && Math.random() < 0.33) {
+      return { ...cabin, condition: degradeCabinCondition(cabin.condition) }
+    }
+
+    return { ...cabin, receivedMaintenanceThisSeason: false }
+  })
+
+  // Cash upkeep shortfall check
+  if (next.finances.cashOnHand < 0) {
     events.push({
       id: generateId(), season, year,
       category: 'Economic',
       title: 'Cash Shortfall',
-      description: `You cannot cover full labor clothing costs. $${upkeepCheck.cashShortfall.toFixed(0)} short.`,
-      effects: ['Conditions Index declining'],
+      description: 'Upkeep costs exceeded available cash this season. Debt is growing.',
+      effects: ['Conditions Index may decline'],
     })
   }
 
   // Apply interest on outstanding debts
-  const factorInterestRate = FINANCE_RATES.factorAdvancePerSeason.min
-  const mortgageInterestRate = FINANCE_RATES.landMortgagePerYear.min / 4  // quarterly
-  const noteInterestRate = FINANCE_RATES.personalNotePerYear.min / 4
+  const factorInterestRate   = FINANCE_RATES.factorAdvancePerSeason.min
+  const mortgageInterestRate = FINANCE_RATES.landMortgagePerYear.min / 4
+  const noteInterestRate     = FINANCE_RATES.personalNotePerYear.min / 4
 
   const factorInterestAccrued   = next.finances.factorAdvanceDebt * factorInterestRate
   const mortgageInterestAccrued = next.finances.mortgageDebt * mortgageInterestRate
@@ -378,9 +495,6 @@ export function resolveSeasonEnd(state: GameState): GameState {
   next.finances.mortgageDebt      *= (1 + mortgageInterestRate)
   next.finances.personalNoteDebt  *= (1 + noteInterestRate)
 
-  // Interest accrues onto the debt balance — it does not touch cashOnHand
-  // directly, but it's recorded in the transaction log (amount 0 cash
-  // change) so the player can see debt growing even when cash doesn't move.
   const totalInterestAccrued = factorInterestAccrued + mortgageInterestAccrued + noteInterestAccrued
   if (totalInterestAccrued > 0.01) {
     next.transactionLog.push(recordTransaction({
@@ -391,10 +505,12 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }))
   }
 
-  // Check for foreclosure
+  // Check for foreclosure (grace period: first 4 seasons)
+  const FORECLOSURE_GRACE_PERIOD_SEASONS = 4
+  const pastGracePeriod = seasonsPlayed > FORECLOSURE_GRACE_PERIOD_SEASONS
   const totalDebt   = next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt
   const totalAssets = next.finances.cashOnHand + estimateAssetValue(next)
-  if (totalDebt > totalAssets * 1.5) {
+  if (pastGracePeriod && totalDebt > totalAssets * 1.5) {
     events.push({
       id: generateId(), season, year,
       category: 'Economic',
@@ -455,6 +571,28 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // Add all events to the log
   next.eventLog = [...next.eventLog, ...events]
+
+  // ── Debug log entry ───────────────────────────────────────────────────────
+  const debugEntry: DebugEntry = {
+    season, year,
+    weather: weather as string,
+    tiles: debugTileData,
+    workers: next.workers.map(w => ({
+      id: w.id, name: w.name, type: w.laborType, health: w.health,
+      task: w.assignedTask?.type ?? 'Unassigned',
+    })),
+    finances: {
+      cashStart:      state.finances.cashOnHand,
+      cashEnd:        next.finances.cashOnHand,
+      debtTotal:      next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt,
+      salesRevenue:   saleResult.revenue,
+      upkeepClothing: clothingUpkeep,
+      upkeepRental:   totalRentalCost,
+      upkeepInterest: totalInterestAccrued,
+    },
+    events: events.map(e => `[${e.category}] ${e.title}: ${e.description}`),
+  }
+  next.debugLog = [...(next.debugLog ?? []), debugEntry]
 
   return next
 }
@@ -579,6 +717,26 @@ function computeYieldModifierFromSoil(soil: { organicMatter: number; nitrogen: n
 
 function generateId(): string {
   return Math.random().toString(36).slice(2, 10)
+}
+
+function degradeCabinCondition(condition: string): string {
+  const progression: Record<string, string> = {
+    'Good':    'Fair',
+    'Fair':    'Poor',
+    'Poor':    'Damaged',
+    'Damaged': 'Damaged',
+  }
+  return progression[condition] ?? condition
+}
+
+function snapSoil(soil: { organicMatter: number; nitrogen: number; soilFauna: number; moistureRetention: number }): { om: number; n: number; sf: number; mr: number; composite: number } {
+  return {
+    om: Math.round(soil.organicMatter),
+    n:  Math.round(soil.nitrogen),
+    sf: Math.round(soil.soilFauna),
+    mr: Math.round(soil.moistureRetention),
+    composite: Math.round(computeYieldModifierFromSoil(soil) * 100),
+  }
 }
 
 /**

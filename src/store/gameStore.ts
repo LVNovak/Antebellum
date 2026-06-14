@@ -38,6 +38,9 @@ import {
   STARTING_SOIL_BY_TERRAIN,
   LAND_CLEARING_COST,
   MANURE_APPLICATION_BOOST,
+  SEED_PURCHASE_COST,
+  COMPOST_FACILITY_COST,
+  COVER_CROP_SEED_STOCK_COST,
 } from '@engine/constants'
 
 // ---------------------------------------------------------------------------
@@ -70,7 +73,7 @@ export type TileAction =
 interface GameStore {
   gameState:            GameState | null
   isPlaying:            boolean
-  activePanel:          'map' | 'roster' | 'ledger' | 'market' | 'trophies'
+  activePanel:          'map' | 'roster' | 'ledger' | 'market' | 'trophies' | 'debug'
   showingSeasonSummary: boolean
   showingSeasonPlanner: boolean
   lastSeasonEvents:     GameState['eventLog']
@@ -104,6 +107,14 @@ interface GameStore {
 
   // Soil management
   compostTile:            (tileId: string) => void
+
+  // Seeds and infrastructure
+  buySeeds:               (crop: CropType) => void
+  buildCompostFacility:   () => void
+  buyCoverCropSeedStock:  () => void
+
+  // Field management
+  clearTileField:         (tileId: string) => void
 
   // Labor release
   releaseWorker:          (workerId: string) => void
@@ -377,6 +388,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       hasStumpRot:               false,
       stumpRotSeasonsLeft:       0,
       clearingProgressRemaining: LAND_CLEARING_COST[terrain],
+      history: [],
     }
 
     const newCash = gameState.finances.cashOnHand - totalCost
@@ -460,6 +472,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   compostTile: (tileId) => {
     const { gameState } = get()
     if (!gameState) return
+    if (!gameState.compostFacilityBuilt) return      // facility required
     if (gameState.clearedMaterialOnHand < 1) return
 
     const tile = gameState.tiles.find(t => t.id === tileId)
@@ -487,7 +500,93 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
-  // ── Release a worker ─────────────────────────────────────────────────────
+  // ── Buy seeds for a crop ──────────────────────────────────────────────────
+  buySeeds: (crop) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const cost = SEED_PURCHASE_COST[crop] ?? 0
+    if (cost > 0 && gameState.finances.cashOnHand < cost) return
+
+    const newCash = gameState.finances.cashOnHand - cost
+    const updated: GameState = {
+      ...gameState,
+      seedInventory: { ...gameState.seedInventory, [crop]: 1 },
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: cost > 0 ? [...gameState.transactionLog, recordTransaction({
+        description:   `Bought ${crop} seed stock`,
+        amount:        -cost,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })] : gameState.transactionLog,
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Build compost facility ────────────────────────────────────────────────
+  buildCompostFacility: () => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (gameState.compostFacilityBuilt) return
+    if (gameState.finances.cashOnHand < COMPOST_FACILITY_COST) return
+
+    const newCash = gameState.finances.cashOnHand - COMPOST_FACILITY_COST
+    const updated: GameState = {
+      ...gameState,
+      compostFacilityBuilt: true,
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   'Built compost facility',
+        amount:        -COMPOST_FACILITY_COST,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Buy cover crop seed stock ─────────────────────────────────────────────
+  buyCoverCropSeedStock: () => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (gameState.coverCropSeedStockOwned) return
+    if (gameState.finances.cashOnHand < COVER_CROP_SEED_STOCK_COST) return
+
+    const newCash = gameState.finances.cashOnHand - COVER_CROP_SEED_STOCK_COST
+    const updated: GameState = {
+      ...gameState,
+      coverCropSeedStockOwned: true,
+      seedInventory: { ...gameState.seedInventory, [CropType.CoverCrop]: 1 },
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   'Bought cover crop seed stock (permanent unlock)',
+        amount:        -COVER_CROP_SEED_STOCK_COST,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Clear a tile's crop without harvesting ────────────────────────────────
+  clearTileField: (tileId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updated: GameState = {
+      ...gameState,
+      tiles: gameState.tiles.map(t =>
+        t.id === tileId ? { ...t, currentCrop: null } : t
+      ),
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
   releaseWorker: (workerId) => {
     const { gameState } = get()
     if (!gameState) return
@@ -644,10 +743,11 @@ function buildInitialGameState(params: NewGameParams): GameState {
     workers:         [worker1, worker2],
     cabins:          [cabin1, cabin2],
     blanketsOnHand:  4,
-    // Starting provisions: 8 units ≈ 4 seasons of food for 2 workers,
-    // giving the player one year before corn becomes critical.
     cornOnHand:      8,
     clearedMaterialOnHand: 0,
+    seedInventory:   {},  // no seeds at start — player must buy before first planting
+    compostFacilityBuilt:    false,
+    coverCropSeedStockOwned: false,
     conditionsIndex: 75,
     storage: {
       capacity:             STORAGE_CAPACITY_NONE,
@@ -688,6 +788,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     eventLog:  [],
     trophies:  [],
     transactionLog: buildStartingTransactions(startingCapital, cashOnHand, factorAdvance, personalNote),
+    debugLog:  [],
   }
 }
 
@@ -763,6 +864,7 @@ function buildGrantTile(origin: Origin) {
     hasStumpRot:               false,
     stumpRotSeasonsLeft:       0,
     clearingProgressRemaining: config.isCleared ? 0 : LAND_CLEARING_COST[config.terrain],
+    history: [],
   }
 }
 
