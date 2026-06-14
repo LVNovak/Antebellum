@@ -58,14 +58,6 @@ const LABOR_TYPE_LABELS: Record<LaborType, string> = {
 // Cowpeas, Sweet Potato, and Cover Crop cover the core rotation loop
 // (cash crop, food crop, nitrogen-fixer, subsistence buffer, soil
 // restoration) without requiring water-adjacent land.
-const PLANTABLE_CROPS: CropType[] = [
-  CropType.Tobacco,
-  CropType.Corn,
-  CropType.Cowpeas,
-  CropType.SweetPotato,
-  CropType.CoverCrop,
-]
-
 const CROP_LABELS: Record<CropType, string> = {
   [CropType.Tobacco]:     'Tobacco',
   [CropType.Rice]:        'Rice',
@@ -206,9 +198,10 @@ export default function SeasonPlanner() {
       return
     }
 
-    if (action.type === 'Clear')   setTileAction(tile.id, { type: 'Clear',   workers: newCount })
-    if (action.type === 'Tend')    setTileAction(tile.id, { type: 'Tend',    workers: newCount })
-    if (action.type === 'Harvest') setTileAction(tile.id, { type: 'Harvest', workers: newCount })
+    if (action.type === 'Clear')      setTileAction(tile.id, { type: 'Clear',   workers: newCount })
+    if (action.type === 'Tend')       setTileAction(tile.id, { type: 'Tend',    workers: newCount })
+    if (action.type === 'Harvest')    setTileAction(tile.id, { type: 'Harvest', workers: newCount })
+    if (action.type === 'ClearField') setTileAction(tile.id, { type: 'ClearField', workers: newCount })
     if (action.type === 'Plant' && action.crop)
       setTileAction(tile.id, { type: 'Plant', workers: newCount, crop: action.crop })
   }

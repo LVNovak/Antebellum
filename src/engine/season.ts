@@ -31,6 +31,7 @@ import {
   WeatherEvent,
   CropType,
   LaborType,
+  CabinCondition,
   DebugEntry,
   TileHistoryEntry,
 } from './types'
@@ -54,7 +55,6 @@ import {
   applySeasonalHealthChanges,
   computeConditionsIndex,
   getResistanceProbability,
-  checkUpkeepRequirements,
 } from './labor'
 import { generateSeasonalPrices, processQueuedSales, applySpoilage } from './market'
 import { checkAchievements } from './achievements'
@@ -719,12 +719,12 @@ function generateId(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
-function degradeCabinCondition(condition: string): string {
-  const progression: Record<string, string> = {
-    'Good':    'Fair',
-    'Fair':    'Poor',
-    'Poor':    'Damaged',
-    'Damaged': 'Damaged',
+function degradeCabinCondition(condition: CabinCondition): CabinCondition {
+  const progression: Record<CabinCondition, CabinCondition> = {
+    [CabinCondition.Good]:    CabinCondition.Fair,
+    [CabinCondition.Fair]:    CabinCondition.Poor,
+    [CabinCondition.Poor]:    CabinCondition.Damaged,
+    [CabinCondition.Damaged]: CabinCondition.Damaged,
   }
   return progression[condition] ?? condition
 }

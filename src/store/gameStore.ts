@@ -60,10 +60,11 @@ export interface SeasonPlan {
 }
 
 export type TileAction =
-  | { type: 'Clear';   workers: number }
-  | { type: 'Plant';   workers: number; crop: CropType }
-  | { type: 'Tend';    workers: number }
-  | { type: 'Harvest'; workers: number }
+  | { type: 'Clear';      workers: number }
+  | { type: 'Plant';      workers: number; crop: CropType }
+  | { type: 'Tend';       workers: number }
+  | { type: 'Harvest';    workers: number }
+  | { type: 'ClearField'; workers: number }
   | { type: 'Idle' }
 
 // ---------------------------------------------------------------------------

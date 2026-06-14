@@ -27,6 +27,7 @@ function makeTile(soil: SoilHealth, crop: CropType | null = null, hasStumpRot = 
     hasStumpRot,
     stumpRotSeasonsLeft: hasStumpRot ? 1 : 0,
     clearingProgressRemaining: 0,
+    history: [],
   }
 }
 

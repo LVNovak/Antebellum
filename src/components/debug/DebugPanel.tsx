@@ -16,9 +16,10 @@ export default function DebugPanel() {
   if (!gameState) return null
 
   const log = [...(gameState.debugLog ?? [])].reverse()
+  const gs = gameState  // narrowed reference for use inside closures
 
   function handleCopy() {
-    const json = JSON.stringify(gameState.debugLog, null, 2)
+    const json = JSON.stringify(gs.debugLog, null, 2)
     navigator.clipboard.writeText(json).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
