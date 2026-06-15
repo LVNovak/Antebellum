@@ -107,10 +107,17 @@ export const LABOR_UPKEEP = {
  * Free wage labor costs far more — historically 3-5x.
  */
 export const LABOR_SEASONAL_COST: Record<LaborType, { min: number; max: number }> = {
-  [LaborType.EnslavedPurchased]: { min: 5,   max: 10  },  // provision only
-  [LaborType.EnslavedHiredOut]:  { min: 15,  max: 25  },  // rental + provision
-  [LaborType.IndenturedBlack]:   { min: 10,  max: 20  },  // contract terms vary
-  [LaborType.IndenturedWhite]:   { min: 10,  max: 20  },  // contract terms vary
+  // Purchased enslaved: NO cash seasonal cost — cost is entirely provisions
+  // (corn, blankets, clothing). Showing $0 here prevents confusing UI display.
+  [LaborType.EnslavedPurchased]: { min: 0,   max: 0   },  // provisions only — see LABOR_UPKEEP
+  // Hired-out enslaved: rental fee to the owner covers provision; player pays
+  // a single all-in seasonal rate.
+  [LaborType.EnslavedHiredOut]:  { min: 15,  max: 25  },  // rental + provision (all-in)
+  // Indentured servants: contract fees and transported persons commanded higher
+  // rates than hired-out enslaved — scarce pool, negotiated terms.
+  // Historically above hired-out cost but below free wage rates.
+  [LaborType.IndenturedBlack]:   { min: 20,  max: 35  },  // contract terms; above hired-out
+  [LaborType.IndenturedWhite]:   { min: 20,  max: 35  },  // immigrant contract; same range
   [LaborType.FreeWage]:          { min: 35,  max: 55  },  // market wages; 3-5x enslaved
 }
 

@@ -100,6 +100,7 @@ export default function SeasonPlanner() {
   const buildCompostFacility = useGameStore(s => s.buildCompostFacility)
   const buyCoverCropSeedStock = useGameStore(s => s.buyCoverCropSeedStock)
   const clearTileField        = useGameStore(s => s.clearTileField)
+  const buildNewCabin         = useGameStore(s => s.buildNewCabin)
 
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
@@ -467,21 +468,21 @@ export default function SeasonPlanner() {
                     const cost = LABOR_ACQUISITION_COST[laborType].min
                     const seasonalCost = LABOR_SEASONAL_COST[laborType].min
                     const canAfford = finances.cashOnHand >= cost && cabinSpaceAvailable > 0
+                    const costLabel = laborType === LaborType.EnslavedPurchased
+                      ? 'Provisions only (corn + blankets)'
+                      : `~$${seasonalCost}/season`
                     return (
                       <div key={laborType} className="flex items-center justify-between">
                         <div className="flex flex-col">
                           <span className="text-earth-300 text-xs">{LABOR_TYPE_LABELS[laborType]}</span>
                           <span className="text-earth-600 text-[10px]">
-                            ~${seasonalCost}/season upkeep
+                            {costLabel}
                           </span>
                         </div>
                         <button
                           onClick={() => {
                             const before = workers.length
                             hireWorker(laborType)
-                            // Confirmation message — workers.length here is
-                            // pre-update (this render's snapshot), so we
-                            // describe the expected new total.
                             setLastHireMessage(
                               `Hired — now ${before + 1} worker(s) on the roster.`
                             )
@@ -540,7 +541,24 @@ export default function SeasonPlanner() {
           <Section title="Build & Seeds">
             <div className="px-4 py-3 space-y-4">
 
-              {/* Smokehouse */}
+              {/* Build Cabin */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-earth-200 text-sm font-bold">New Cabin</span>
+                  <p className="text-earth-500 text-xs">Adds 4 worker capacity. Starts in Good condition.</p>
+                  <p className="text-earth-400 text-xs">
+                    ${CABIN_BUILD_COST_MIN} — {cabins.length} cabin{cabins.length !== 1 ? 's' : ''} now
+                    ({cabins.reduce((s, c) => s + c.capacity, 0)} capacity / {workers.length} workers)
+                  </p>
+                </div>
+                <button
+                  onClick={buildNewCabin}
+                  disabled={finances.cashOnHand < CABIN_BUILD_COST_MIN}
+                  className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                >
+                  {finances.cashOnHand >= CABIN_BUILD_COST_MIN ? 'Build' : `Need $${CABIN_BUILD_COST_MIN}`}
+                </button>
+              </div>
               {!smokehouseBuilt && (
                 <div className="flex items-center justify-between">
                   <div>

@@ -469,19 +469,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }))
   }
 
-  // Housing upkeep — $6/cabin/season (Phase 1 simplification; GDD v0.5 Section 6.3)
-  const cabinUpkeep = next.cabins.length * 6
-  next.finances.cashOnHand -= cabinUpkeep
-  if (cabinUpkeep > 0) {
-    next.transactionLog.push(recordTransaction({
-      description:   `Cabin upkeep (${next.cabins.length} cabin${next.cabins.length !== 1 ? 's' : ''} × $6)`,
-      amount:        -cabinUpkeep,
-      newCashOnHand: next.finances.cashOnHand,
-      season, year,
-    }))
-  }
-
   // Cabin condition — repair and decay
+  // Cost pressure comes from: condition decay hurting productivity,
+  // repair requiring a worker assignment, and building new cabins.
+  // There is no passive per-season cash charge — that was double-counting
+  // alongside provisions and repair costs.
   // One worker assigned RepairCabin covers ALL cabins on the plantation.
   // Simple shacks: if someone fixes it, it's fixed — restored to Good.
   // Decay is rare under normal conditions — these are new buildings.

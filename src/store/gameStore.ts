@@ -31,6 +31,7 @@ import {
   STORAGE_CAPACITY_NONE,
   STORAGE_CAPACITY_SMOKEHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
+  CABIN_BUILD_COST_MIN,
   LAND_PARCEL_COST,
   WATER_ADJACENT_PRICE_PREMIUM,
   LABOR_ACQUISITION_COST,
@@ -111,6 +112,7 @@ interface GameStore {
   buySeeds:               (crop: CropType) => void
   buildCompostFacility:   () => void
   buyCoverCropSeedStock:  () => void
+  buildNewCabin:          () => void
 
   // Field management
   clearTileField:         (tileId: string) => void
@@ -573,6 +575,38 @@ export const useGameStore = create<GameStore>((set, get) => ({
       transactionLog: [...gameState.transactionLog, recordTransaction({
         description:   'Bought cover crop seed stock (permanent unlock)',
         amount:        -COVER_CROP_SEED_STOCK_COST,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Build a new cabin ─────────────────────────────────────────────────────
+  buildNewCabin: () => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (gameState.finances.cashOnHand < CABIN_BUILD_COST_MIN) return
+
+    const newId   = `cabin-${Date.now()}`
+    const newCash = gameState.finances.cashOnHand - CABIN_BUILD_COST_MIN
+    const newCabin = {
+      id:       newId,
+      condition: CabinCondition.Good,
+      capacity:  4 as const,
+      occupants: [] as string[],
+      receivedMaintenanceThisSeason: false,
+    }
+
+    const updated: GameState = {
+      ...gameState,
+      cabins:   [...gameState.cabins, newCabin],
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   `Built new cabin (+4 capacity)`,
+        amount:        -CABIN_BUILD_COST_MIN,
         newCashOnHand: newCash,
         season:        gameState.currentSeason,
         year:          gameState.currentYear,
