@@ -87,6 +87,7 @@ export default function SeasonPlanner() {
   const setTileAction        = useGameStore(s => s.setTileAction)
   const setCabinRepair       = useGameStore(s => s.setCabinRepairWorkers)
   const setStorageWorkers    = useGameStore(s => s.setStorageWorkers)
+  const setCompostWorkers    = useGameStore(s => s.setCompostWorkers)
   const confirmPlanAndAdvance = useGameStore(s => s.confirmPlanAndAdvance)
   const closeSeasonPlanner   = useGameStore(s => s.closeSeasonPlanner)
   const buySupplies          = useGameStore(s => s.buySupplies)
@@ -406,10 +407,10 @@ export default function SeasonPlanner() {
                   </p>
                 </div>
                 <WorkerCounter
-                  value={seasonPlan.storageWorkers}
-                  onDecrease={() => setStorageWorkers(Math.max(0, seasonPlan.storageWorkers - 1))}
-                  onIncrease={() => setStorageWorkers(seasonPlan.storageWorkers + 1)}
-                  max={remaining + seasonPlan.storageWorkers}
+                  value={seasonPlan.compostWorkers}
+                  onDecrease={() => setCompostWorkers(Math.max(0, seasonPlan.compostWorkers - 1))}
+                  onIncrease={() => setCompostWorkers(seasonPlan.compostWorkers + 1)}
+                  max={remaining + seasonPlan.compostWorkers}
                 />
               </div>
             )}

@@ -50,13 +50,10 @@ import {
 // ---------------------------------------------------------------------------
 
 export interface SeasonPlan {
-  // tileId -> action -> workers allocated
   tileAllocations: Record<string, TileAction>
-  // workers allocated to cabin repair (spread across all cabins)
   cabinRepairWorkers: number
-  // workers allocated to storage management
   storageWorkers: number
-  // remaining workers rest automatically
+  compostWorkers: number   // separate from storage — tends compost facility
 }
 
 export type TileAction =
@@ -95,6 +92,7 @@ interface GameStore {
   setTileAction:          (tileId: string, action: TileAction) => void
   setCabinRepairWorkers:  (count: number) => void
   setStorageWorkers:      (count: number) => void
+  setCompostWorkers:      (count: number) => void
   confirmPlanAndAdvance:  () => void
 
   // Supply and build actions
@@ -132,18 +130,15 @@ interface NewGameParams {
 // ---------------------------------------------------------------------------
 
 function emptySeasonPlan(): SeasonPlan {
-  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0 }
+  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0, compostWorkers: 0 }
 }
 
-/**
- * Counts total workers allocated in a plan.
- */
 export function countAllocatedWorkers(plan: SeasonPlan): number {
   const tileTotal = Object.values(plan.tileAllocations).reduce((sum, action) => {
     if (action.type === 'Idle') return sum
     return sum + action.workers
   }, 0)
-  return tileTotal + plan.cabinRepairWorkers + plan.storageWorkers
+  return tileTotal + plan.cabinRepairWorkers + plan.storageWorkers + plan.compostWorkers
 }
 
 /**
@@ -177,9 +172,14 @@ function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['work
     assignments.push({ type: 'RepairCabin', cabinId })
   }
 
-  // Storage
+  // Storage management
   for (let i = 0; i < plan.storageWorkers; i++) {
     assignments.push({ type: 'ManageStorage' })
+  }
+
+  // Compost tending — separate task, separate counter
+  for (let i = 0; i < plan.compostWorkers; i++) {
+    assignments.push({ type: 'ManageStorage' })  // reuses ManageStorage task type internally
   }
 
   // Assign workers in roster order; remaining workers rest
@@ -246,6 +246,10 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   setStorageWorkers: (count) => set(s => ({
     seasonPlan: { ...s.seasonPlan, storageWorkers: count }
+  })),
+
+  setCompostWorkers: (count) => set(s => ({
+    seasonPlan: { ...s.seasonPlan, compostWorkers: count }
   })),
 
   // ── Confirm plan and advance season ──────────────────────────────────────
@@ -606,7 +610,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       case LaborType.EnslavedPurchased:
         // Sold back at a loss — half the liquidation value used in
         // foreclosure assessment, reflecting a forced/quick sale.
-        cashDelta = 250
+        cashDelta = 150  // ~50% of $300 purchase price floor in a forced sale
         description = `Sold ${worker.name} (Enslaved, Purchased) — recovered $${cashDelta} at a loss`
         break
 
@@ -876,7 +880,7 @@ function buildGrantTile(origin: Origin) {
 function buildCabin(id: string) {
   return {
     id,
-    condition:  CabinCondition.Fair,
+    condition:  CabinCondition.Good,  // freshly built — new plantation, new construction
     capacity:   4 as const,
     occupants:  [] as string[],
     receivedMaintenanceThisSeason: false,

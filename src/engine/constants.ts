@@ -136,12 +136,25 @@ export const LABOR_SEASONAL_COST: Record<LaborType, { min: number; max: number }
  * Hired-out enslaved and rental-based indenture have no acquisition
  * cost — only the seasonal rental fee in LABOR_SEASONAL_COST.
  */
+/**
+ * One-time acquisition cost by labor type.
+ *
+ * Revised to match 17th-century Carolina price records:
+ * - Enslaved (purchased): £16–£25 sterling in 1670s-1690s Carolina.
+ *   At 20 shillings/£ and $1 ≈ 1 shilling, that's roughly $320-$500.
+ *   Prices rose through the 18th century to £60-£80 — the original
+ *   $900-$1,400 reflected those later, higher prices. Corrected here.
+ *   Source: Statista / Colonial slave price records 1638-1775.
+ * - Indentured: transport + contract fee typically £4-£8 sterling
+ *   ($80-$160 at our conversion rate).
+ * - Hired-out enslaved and free wage: no acquisition cost; seasonal fee only.
+ */
 export const LABOR_ACQUISITION_COST: Record<LaborType, { min: number; max: number }> = {
-  [LaborType.EnslavedPurchased]: { min: 900, max: 1400 },  // permanent asset; highest upfront cost
+  [LaborType.EnslavedPurchased]: { min: 300, max: 500  },  // £15-£25 sterling; 17th-century Carolina
   [LaborType.EnslavedHiredOut]:  { min: 0,   max: 0    },  // no purchase — seasonal rental only
-  [LaborType.IndenturedBlack]:   { min: 120, max: 250  },  // contract fee — lower end of servant pricing
-  [LaborType.IndenturedWhite]:   { min: 120, max: 250  },  // contract fee — lower end of servant pricing
-  [LaborType.FreeWage]:          { min: 0,   max: 0    },  // hiring cost only — see LABOR_SEASONAL_COST
+  [LaborType.IndenturedBlack]:   { min: 80,  max: 160  },  // £4-£8 contract/transport fee
+  [LaborType.IndenturedWhite]:   { min: 80,  max: 160  },  // £4-£8 contract/transport fee
+  [LaborType.FreeWage]:          { min: 0,   max: 0    },  // hiring cost only
 }
 
 // ---------------------------------------------------------------------------

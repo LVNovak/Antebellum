@@ -481,17 +481,30 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }))
   }
 
-  // Cabin condition decay — cabins degrade without active repair
-  // Workers assigned RepairCabin task prevent decay on that cabin
-  const repairingWorkers = next.workers.filter(w => w.assignedTask?.type === 'RepairCabin')
+  // Cabin condition — repair and decay
+  // One worker assigned RepairCabin covers ALL cabins on the plantation.
+  // Simple shacks: if someone fixes it, it's fixed — restored to Good.
+  // Decay is rare under normal conditions — these are new buildings.
+  // Storms degrade immediately; neglect degrades slowly over years.
+  const anyRepairWorker = next.workers.some(w => w.assignedTask?.type === 'RepairCabin')
+
   next.cabins = next.cabins.map(cabin => {
-    const isBeingRepaired = repairingWorkers.some(
-      w => w.assignedTask?.type === 'RepairCabin' && (w.assignedTask as { cabinId: string }).cabinId === cabin.id
-    )
-    if (isBeingRepaired) {
-      return { ...cabin, receivedMaintenanceThisSeason: true }
+    if (anyRepairWorker) {
+      // Repair restores to Good regardless of current condition.
+      // One worker can handle all cabins in a season.
+      if (cabin.condition !== CabinCondition.Good) {
+        events.push({
+          id: generateId(), season, year,
+          category: 'Economic',
+          title: 'Cabin Repaired',
+          description: `Workers restored a cabin to Good condition.`,
+          effects: ['Cabin condition: Good'],
+        })
+      }
+      return { ...cabin, condition: CabinCondition.Good, receivedMaintenanceThisSeason: true }
     }
 
+    // Storm damage — immediate one-tier degradation
     if (weather === WeatherEvent.Storm && cabin.condition !== CabinCondition.Damaged) {
       const newCondition = degradeCabinCondition(cabin.condition)
       events.push({
@@ -501,19 +514,22 @@ export function resolveSeasonEnd(state: GameState): GameState {
         description: `Storm damaged a cabin — condition dropped from ${cabin.condition} to ${newCondition}.`,
         effects: [`Cabin condition: ${newCondition}`],
       })
-      return { ...cabin, condition: newCondition }
+      return { ...cabin, condition: newCondition, receivedMaintenanceThisSeason: false }
     }
 
+    // Slow neglect decay — only applies if cabin has gone multiple seasons
+    // without any maintenance. At 10%/season, a cabin goes Good→Fair in
+    // roughly 2-3 years of total neglect, matching simple construction lifespan.
     if (!cabin.receivedMaintenanceThisSeason && Math.random() < 0.10) {
       const newCondition = degradeCabinCondition(cabin.condition)
       events.push({
         id: generateId(), season, year,
         category: 'Economic',
         title: 'Cabin Decay',
-        description: `A cabin has fallen into disrepair — condition dropped from ${cabin.condition} to ${newCondition}. Assign workers to repair it.`,
+        description: `A cabin has fallen into disrepair — condition dropped from ${cabin.condition} to ${newCondition}. Assign a worker to repair it.`,
         effects: [`Cabin condition: ${newCondition}`],
       })
-      return { ...cabin, condition: newCondition }
+      return { ...cabin, condition: newCondition, receivedMaintenanceThisSeason: false }
     }
 
     return { ...cabin, receivedMaintenanceThisSeason: false }
@@ -569,6 +585,33 @@ export function resolveSeasonEnd(state: GameState): GameState {
   }
 
   // ── Step 9: Labor and resistance events ───────────────────────────────────
+
+  // Indenture contract countdown — decrement each season, fire event at expiry
+  next.workers = next.workers.map(worker => {
+    if (worker.contractSeasonsRemaining === null) return worker
+    if (worker.laborType !== LaborType.IndenturedBlack && worker.laborType !== LaborType.IndenturedWhite) return worker
+
+    const newRemaining = worker.contractSeasonsRemaining - 1
+
+    if (newRemaining <= 0) {
+      events.push({
+        id: generateId(), season, year,
+        category: 'Labor',
+        title: 'Indenture Term Complete',
+        description: `${worker.name}'s indenture contract has ended. You may offer wage employment, release them, or attempt to renegotiate terms.`,
+        effects: ['Worker is now free — renegotiate or release in the Labor Roster'],
+      })
+      // Convert to free wage on expiry — player can release via the roster
+      return {
+        ...worker,
+        laborType: LaborType.FreeWage,
+        contractSeasonsRemaining: null,
+        wagePerSeason: LABOR_SEASONAL_COST[LaborType.FreeWage].min,
+      }
+    }
+
+    return { ...worker, contractSeasonsRemaining: newRemaining }
+  })
   next.conditionsIndex = computeConditionsIndex(next.workers)
   const resistanceChance = getResistanceProbability(next.conditionsIndex)
 
@@ -746,7 +789,7 @@ function estimateAssetValue(state: GameState): number {
   }, 0)
 
   const laborValue = state.workers.reduce((sum, worker) => {
-    if (worker.laborType === 'EnslavedPurchased') return sum + 500
+    if (worker.laborType === 'EnslavedPurchased') return sum + 200  // conservative liquidation at ~50% of $300-500 purchase price
     if (worker.laborType === 'IndenturedBlack' || worker.laborType === 'IndenturedWhite') return sum + 75
     return sum
   }, 0)

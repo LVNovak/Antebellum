@@ -157,16 +157,20 @@ export function applySeasonalHealthChanges(params: {
 
     const isOvercrowded = cabin !== null && cabin.occupants.length > CABIN_CAPACITY
 
-    const hasBadHousing = cabin === null ||
-      cabin.condition === CabinCondition.Poor ||
-      cabin.condition === CabinCondition.Damaged
+    // Poor cabin is a stress factor (risk of decline) but not a full
+    // recovery blocker. Only Damaged cabin is severe enough to prevent
+    // recovery entirely — a leaking, structurally unsound building.
+    const hasBadHousing = cabin === null || cabin.condition === CabinCondition.Damaged
+    const hasPoorHousing = cabin !== null && cabin.condition === CabinCondition.Poor
 
     // Storm exposure — workers without adequate shelter take a hit
     const isStormExposed = weatherWasStorm && hasBadHousing
 
-    // Count how many negative factors apply
+    // Count stress factors — Poor cabin counts as half a factor (rounded
+    // into probability), Damaged cabin counts as a full factor.
     const stressFactors = [isHungry, isCold, isOvercrowded, hasBadHousing, isStormExposed]
       .filter(Boolean).length
+      + (hasPoorHousing ? 0.5 : 0)
 
     if (stressFactors >= 3) {
       health = declineHealth(health)
