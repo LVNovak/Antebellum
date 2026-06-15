@@ -530,8 +530,8 @@ export const FACTOR_RELATIONSHIP_PRICE_BONUS_MAX = 0.15  // +15% at 100 relation
 // ---------------------------------------------------------------------------
 
 export const STORAGE_CAPACITY_NONE         = 0
-export const STORAGE_CAPACITY_SMOKEHOUSE   = 50
-export const STORAGE_CAPACITY_STOREHOUSE   = 80
+export const STORAGE_CAPACITY_SMOKEHOUSE   = 300   // handles ~10-tile harvest at good soil
+export const STORAGE_CAPACITY_STOREHOUSE   = 600   // handles large multi-crop operations
 
 export const SMOKEHOUSE_BUILD_COST_MIN     = 200
 export const SMOKEHOUSE_BUILD_COST_MAX     = 500

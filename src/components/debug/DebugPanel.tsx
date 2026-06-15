@@ -29,7 +29,10 @@ export default function DebugPanel() {
   return (
     <div className="p-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="font-serif text-earth-100 text-xl">Debug Log</h2>
+        <div>
+          <h2 className="font-serif text-earth-100 text-xl">Debug Log</h2>
+          <p className="text-earth-600 text-xs">v{gameState.version}</p>
+        </div>
         <button onClick={handleCopy}
           className="px-3 py-1.5 bg-earth-700 border border-earth-600 text-earth-300 text-xs rounded">
           {copied ? '✓ Copied' : 'Copy JSON'}

@@ -150,7 +150,7 @@ export default function SeasonPlanner() {
 
   function handleQueueSale(crop: CropType) {
     const qty   = saleQty[crop]   ?? 0
-    const price = salePrice[crop] ?? null
+    const price = (salePrice[crop] && salePrice[crop]! > 0) ? salePrice[crop]! : null
     if (qty > 0) {
       queueSale(crop, qty, price)
       setSaleQty(p  => ({ ...p, [crop]: 0 }))
@@ -385,7 +385,25 @@ export default function SeasonPlanner() {
               <div className="px-4 py-3 border-b border-earth-800 flex items-center justify-between">
                 <div>
                   <span className="text-earth-200 text-sm">Storage Management</span>
-                  <p className="text-earth-500 text-xs">Cooper/Carpenter reduces spoilage</p>
+                  <p className="text-earth-500 text-xs">Skilled Cooper/Carpenter reduces spoilage</p>
+                </div>
+                <WorkerCounter
+                  value={seasonPlan.storageWorkers}
+                  onDecrease={() => setStorageWorkers(Math.max(0, seasonPlan.storageWorkers - 1))}
+                  onIncrease={() => setStorageWorkers(seasonPlan.storageWorkers + 1)}
+                  max={remaining + seasonPlan.storageWorkers}
+                />
+              </div>
+            )}
+
+            {compostFacilityBuilt && clearedMaterialOnHand > 0 && (
+              <div className="px-4 py-3 border-b border-earth-800 flex items-center justify-between">
+                <div>
+                  <span className="text-earth-200 text-sm">Tend Compost</span>
+                  <p className="text-earth-500 text-xs">
+                    {clearedMaterialOnHand} unit(s) available. 1 worker applies compost to 1 parcel per season.
+                    Apply in Land &amp; Crops above after assigning a worker here.
+                  </p>
                 </div>
                 <WorkerCounter
                   value={seasonPlan.storageWorkers}
@@ -624,7 +642,11 @@ export default function SeasonPlanner() {
                         type="number"
                         min={0}
                         value={salePrice[crop] ?? ''}
-                        onChange={e => setSalePrice(p => ({ ...p, [crop]: Number(e.target.value) || 0 }))}
+                        onChange={e => {
+                          const val = Number(e.target.value)
+                          // 0 or empty = no price floor (null), not a floor of $0
+                          setSalePrice(p => ({ ...p, [crop]: val > 0 ? val : undefined }))
+                        }}
                         placeholder="Min $"
                         className="w-20 bg-earth-800 border border-earth-600 text-earth-100 px-2 py-1 rounded text-sm"
                       />

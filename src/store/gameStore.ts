@@ -736,7 +736,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
   const { cashOnHand, factorAdvance, personalNote } = getStartingFinances(startingCapital)
 
   return {
-    version:         '0.1.0',
+    version:         '0.5.0',
     createdAt:       now,
     lastSavedAt:     now,
     playerName,

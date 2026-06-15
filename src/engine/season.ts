@@ -307,7 +307,62 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   next.cornOnHand = (next.cornOnHand ?? 0) + harvestedCorn
 
-  // ── Step 5: Apply storage spoilage ───────────────────────────────────────
+  // ── Step 5: Process queued sales ──────────────────────────────────────────
+  // Sales execute BEFORE spoilage — the player sells from what they have
+  // this season, then unsold inventory spoils. Previously spoilage ran first,
+  // silently reducing inventory below queued quantities and causing sales to
+  // be rejected without any notification to the player.
+  const commissionRate = FINANCE_RATES.factorCommission.min +
+    Math.random() * (FINANCE_RATES.factorCommission.max - FINANCE_RATES.factorCommission.min)
+
+  const saleResult = processQueuedSales({
+    sales:          next.finances.queuedSales,
+    storage:        next.storage,
+    market:         next.market,
+    factor:         next.finances.factor,
+    commissionRate,
+  })
+
+  next.storage             = saleResult.updatedStorage
+  next.finances.factor     = saleResult.updatedFactor
+  next.finances.cashOnHand += saleResult.revenue
+
+  // Rejected sales persist to next season — don't silently drop them
+  next.finances.queuedSales = saleResult.salesRejected
+    .map(r => next.finances.queuedSales.find(s => s.id === r.saleId)!)
+    .filter(Boolean)
+
+  if (saleResult.salesExecuted.length > 0) {
+    const saleDesc = saleResult.salesExecuted
+      .map(s => `${s.quantity} units of ${s.crop} for $${s.netRevenue.toFixed(0)} net`)
+      .join('; ')
+    events.push({
+      id: generateId(), season, year,
+      category: 'Economic',
+      title: 'Factor Sale Complete',
+      description: `Your factor executed ${saleResult.salesExecuted.length} sale(s): ${saleDesc}. Commission: $${saleResult.factorCommission.toFixed(0)}.`,
+      effects: [`Revenue received: $${saleResult.revenue.toFixed(0)}`],
+    })
+    next.transactionLog.push(recordTransaction({
+      description:   `Factor sale: ${saleDesc} (commission $${saleResult.factorCommission.toFixed(0)})`,
+      amount:        saleResult.revenue,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
+
+  // Surface rejected sales — player needs to know why nothing sold
+  for (const rejected of saleResult.salesRejected) {
+    events.push({
+      id: generateId(), season, year,
+      category: 'Economic',
+      title: 'Sale Not Executed',
+      description: rejected.reason,
+      effects: ['Sale remains queued for next season'],
+    })
+  }
+
+  // ── Step 6: Apply storage spoilage ───────────────────────────────────────
   const { updatedStorage, spoilageReport } = applySpoilage(next.storage)
   next.storage = updatedStorage
 
@@ -322,43 +377,6 @@ export function resolveSeasonEnd(state: GameState): GameState {
       description: `Spoilage in storage this season: ${spoilageDesc}.`,
       effects: spoilageReport.map(s => `${s.amountLost} units of ${s.crop} lost`),
     })
-  }
-
-  // ── Step 6: Process queued sales ──────────────────────────────────────────
-  const commissionRate = FINANCE_RATES.factorCommission.min +
-    Math.random() * (FINANCE_RATES.factorCommission.max - FINANCE_RATES.factorCommission.min)
-
-  const saleResult = processQueuedSales({
-    sales:          next.finances.queuedSales,
-    storage:        next.storage,
-    market:         next.market,
-    factor:         next.finances.factor,
-    commissionRate,
-  })
-
-  next.storage            = saleResult.updatedStorage
-  next.finances.factor    = saleResult.updatedFactor
-  next.finances.cashOnHand += saleResult.revenue
-  next.finances.queuedSales = []  // clear executed/rejected sales
-
-  if (saleResult.salesExecuted.length > 0) {
-    const saleDesc = saleResult.salesExecuted
-      .map(s => `${s.quantity} units of ${s.crop} for $${s.netRevenue.toFixed(0)} net`)
-      .join('; ')
-    events.push({
-      id: generateId(), season, year,
-      category: 'Economic',
-      title: 'Factor Sale Complete',
-      description: `Your factor executed ${saleResult.salesExecuted.length} sale(s): ${saleDesc}. Commission: $${saleResult.factorCommission.toFixed(0)}.`,
-      effects: [`Revenue received: $${saleResult.revenue.toFixed(0)}`],
-    })
-
-    next.transactionLog.push(recordTransaction({
-      description:   `Factor sale: ${saleDesc} (commission $${saleResult.factorCommission.toFixed(0)})`,
-      amount:        saleResult.revenue,
-      newCashOnHand: next.finances.cashOnHand,
-      season, year,
-    }))
   }
 
   // ── Step 7: Labor health changes ──────────────────────────────────────────
@@ -604,6 +622,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // ── Debug log entry ───────────────────────────────────────────────────────
   const debugEntry: DebugEntry = {
+    buildVersion: state.version,
     season, year,
     weather: weather as string,
     tiles: debugTileData,

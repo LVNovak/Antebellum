@@ -170,11 +170,13 @@ export function applySeasonalHealthChanges(params: {
 
     if (stressFactors >= 3) {
       health = declineHealth(health)
-    } else if (stressFactors >= 1) {
-      const declineChance = stressFactors * 0.25
-      if (Math.random() < declineChance) {
-        health = declineHealth(health)
-      }
+    } else if (stressFactors >= 2) {
+      // Multiple stressors: 40% chance of declining
+      if (Math.random() < 0.40) health = declineHealth(health)
+    } else if (stressFactors === 1) {
+      // Single stressor: 15% chance — meaningful but not punishing
+      // for minor issues like slightly crowded but otherwise good conditions
+      if (Math.random() < 0.15) health = declineHealth(health)
     }
 
     // --- Disease spread check with cooldown ---
@@ -216,10 +218,10 @@ export function applySeasonalHealthChanges(params: {
     const goodHousing = cabin !== null &&
       (cabin.condition === CabinCondition.Good || cabin.condition === CabinCondition.Fair)
 
-    // Light workload: rest OR any non-strenuous task (cabin repair, storage management)
-    // Previously only 'Rest' counted — meaning workers assigned to repair
-    // could never recover, leading to permanent VerySick cascades.
-    const lightWorkloadTasks = new Set(['Rest', 'RepairCabin', 'ManageStorage'])
+    // Light workload: rest, repair, storage management, or tending crops
+    // (tending is supervisory/maintenance work, not heavy field labor).
+    // Planting, clearing, and harvesting are heavy tasks that block recovery.
+    const lightWorkloadTasks = new Set(['Rest', 'RepairCabin', 'ManageStorage', 'TendCrop'])
     const lightWorkload = worker.assignedTask
       ? lightWorkloadTasks.has(worker.assignedTask.type)
       : true  // unassigned = resting

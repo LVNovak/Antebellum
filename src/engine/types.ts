@@ -485,6 +485,7 @@ export interface GameState {
  * Copy-to-clipboard as JSON via the Debug panel.
  */
 export interface DebugEntry {
+  buildVersion: string   // from GameState.version — eliminates version confusion in bug reports
   season:  Season
   year:    number
   weather: string
