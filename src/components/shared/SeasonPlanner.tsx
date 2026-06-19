@@ -97,10 +97,12 @@ export default function SeasonPlanner() {
   const hireWorker           = useGameStore(s => s.hireWorker)
   const compostTile          = useGameStore(s => s.compostTile)
   const buySeeds             = useGameStore(s => s.buySeeds)
-  const buildCompostFacility = useGameStore(s => s.buildCompostFacility)
+  const buildCompostFacility  = useGameStore(s => s.buildCompostFacility)
   const buyCoverCropSeedStock = useGameStore(s => s.buyCoverCropSeedStock)
   const clearTileField        = useGameStore(s => s.clearTileField)
   const buildNewCabin         = useGameStore(s => s.buildNewCabin)
+  const cancelSale            = useGameStore(s => s.cancelSale)
+  const updateSaleQuantity    = useGameStore(s => s.updateSaleQuantity)
 
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
@@ -686,12 +688,40 @@ export default function SeasonPlanner() {
           {/* Queued sales this season */}
           {finances.queuedSales.length > 0 && (
             <Section title="Queued This Season">
-              {finances.queuedSales.map(sale => (
-                <div key={sale.id} className="px-4 py-2 text-earth-400 text-xs">
-                  {sale.quantity} × {sale.crop}
-                  {sale.minPriceFloor ? ` (floor $${sale.minPriceFloor})` : ''}
-                </div>
-              ))}
+              {finances.queuedSales.map(sale => {
+                const available = storage.inventory[sale.crop] ?? 0
+                const overQueued = sale.quantity > available
+                return (
+                  <div key={sale.id} className="px-4 py-2 border-b border-earth-800 last:border-0">
+                    <div className="flex items-center justify-between">
+                      <span className={"text-xs " + (overQueued ? "text-red-400" : "text-earth-300")}>
+                        {sale.quantity} × {sale.crop}
+                        {sale.minPriceFloor ? ` (floor $${sale.minPriceFloor})` : ''}
+                        {overQueued && ` — only ${available} in storage`}
+                      </span>
+                      <button
+                        onClick={() => cancelSale(sale.id)}
+                        className="ml-2 px-2 py-0.5 text-[10px] text-earth-500 border border-earth-700 rounded hover:text-red-400 hover:border-red-700"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="text-[10px] text-earth-600">Qty:</span>
+                      <button
+                        onClick={() => updateSaleQuantity(sale.id, Math.max(1, sale.quantity - 1))}
+                        className="w-5 h-5 text-xs text-earth-400 border border-earth-700 rounded flex items-center justify-center"
+                      >−</button>
+                      <span className="text-xs text-earth-300 w-6 text-center">{sale.quantity}</span>
+                      <button
+                        onClick={() => updateSaleQuantity(sale.id, Math.min(available, sale.quantity + 1))}
+                        disabled={sale.quantity >= available}
+                        className="w-5 h-5 text-xs text-earth-400 border border-earth-700 rounded flex items-center justify-center disabled:opacity-40"
+                      >+</button>
+                    </div>
+                  </div>
+                )
+              })}
             </Section>
           )}
 

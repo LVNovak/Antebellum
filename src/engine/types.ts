@@ -233,6 +233,7 @@ export type WorkerTask =
   | { type: 'HarvestCrop';  tileId: string }
   | { type: 'RepairCabin';  cabinId: string }
   | { type: 'ManageStorage' }
+  | { type: 'TendCompost' }  // tends the compost facility; distinct from storage management
   | { type: 'Rest' }        // intentional rest; aids health recovery
 
 // ---------------------------------------------------------------------------

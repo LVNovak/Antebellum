@@ -202,6 +202,7 @@ function formatTask(task: Worker['assignedTask']): string {
     case 'HarvestCrop':  return 'Harvesting'
     case 'RepairCabin':  return 'Repairing quarters'
     case 'ManageStorage': return 'Managing storage'
+    case 'TendCompost': return 'Tending compost'
     case 'Rest':         return 'Resting'
     default:             return 'Working'
   }

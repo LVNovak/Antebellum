@@ -225,7 +225,7 @@ export function applySeasonalHealthChanges(params: {
     // Light workload: rest, repair, storage management, or tending crops
     // (tending is supervisory/maintenance work, not heavy field labor).
     // Planting, clearing, and harvesting are heavy tasks that block recovery.
-    const lightWorkloadTasks = new Set(['Rest', 'RepairCabin', 'ManageStorage', 'TendCrop'])
+    const lightWorkloadTasks = new Set(['Rest', 'RepairCabin', 'ManageStorage', 'TendCompost', 'TendCrop'])
     const lightWorkload = worker.assignedTask
       ? lightWorkloadTasks.has(worker.assignedTask.type)
       : true  // unassigned = resting

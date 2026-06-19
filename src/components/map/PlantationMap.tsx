@@ -53,7 +53,7 @@ export default function PlantationMap() {
     if (task && task.type === 'ClearLand') {
       clearingWorkersByTile.set(task.tileId, (clearingWorkersByTile.get(task.tileId) ?? 0) + 1)
     }
-    if (task && task.type === 'ManageStorage') compostTenders++
+    if (task && task.type === 'TendCompost') compostTenders++
   }
 
   return (

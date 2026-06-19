@@ -100,6 +100,8 @@ interface GameStore {
   buySupplies:            (corn: number, blankets: number) => void
   buildSmokehouse:        () => void
   queueSale:              (crop: CropType, quantity: number, minPrice: number | null) => void
+  cancelSale:             (saleId: string) => void
+  updateSaleQuantity:     (saleId: string, newQuantity: number) => void
 
   // Land and labor acquisition
   buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
@@ -179,9 +181,9 @@ function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['work
     assignments.push({ type: 'ManageStorage' })
   }
 
-  // Compost tending — separate task, separate counter
+  // Compost tending — dedicated task type, distinct from storage management
   for (let i = 0; i < plan.compostWorkers; i++) {
-    assignments.push({ type: 'ManageStorage' })  // reuses ManageStorage task type internally
+    assignments.push({ type: 'TendCompost' })
   }
 
   // Assign workers in roster order; remaining workers rest
@@ -379,6 +381,51 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
+  // ── Cancel a queued sale ─────────────────────────────────────────────────
+  cancelSale: (saleId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updated: GameState = {
+      ...gameState,
+      finances: {
+        ...gameState.finances,
+        queuedSales: gameState.finances.queuedSales.filter(s => s.id !== saleId),
+      },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
+  // ── Update a queued sale quantity ─────────────────────────────────────────
+  updateSaleQuantity: (saleId, newQuantity) => {
+    const { gameState } = get()
+    if (!gameState) return
+    if (newQuantity <= 0) {
+      // Treat zero quantity as a cancel
+      const updated: GameState = {
+        ...gameState,
+        finances: {
+          ...gameState.finances,
+          queuedSales: gameState.finances.queuedSales.filter(s => s.id !== saleId),
+        },
+      }
+      set({ gameState: updated })
+      saveToLocalStorage(updated)
+      return
+    }
+    const updated: GameState = {
+      ...gameState,
+      finances: {
+        ...gameState.finances,
+        queuedSales: gameState.finances.queuedSales.map(s =>
+          s.id === saleId ? { ...s, quantity: newQuantity } : s
+        ),
+      },
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
   // ── Buy a new land parcel ──────────────────────────────────────────────────
   buyLandParcel: (terrain, isWaterAdjacent) => {
     const { gameState } = get()
@@ -431,7 +478,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const totalCapacity = gameState.cabins.reduce((sum, c) => sum + c.capacity, 0)
     if (gameState.workers.length >= totalCapacity) return  // no cabin space
 
-    const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)]
+    // Pick a name not already on the roster; fall back to any name if pool exhausted
+    const usedNames = new Set(gameState.workers.map(w => w.name))
+    const availableNames = WORKER_NAMES.filter(n => !usedNames.has(n))
+    const namePool = availableNames.length > 0 ? availableNames : WORKER_NAMES
+    const name = namePool[Math.floor(Math.random() * namePool.length)]
     const newWorker = {
       id:                       `worker-${gameState.workers.length + 1}-${Math.random().toString(36).slice(2, 6)}`,
       name,
@@ -765,8 +816,10 @@ function buildInitialGameState(params: NewGameParams): GameState {
   const grantTile = buildGrantTile(origin)
   const cabin1    = buildCabin('cabin-1')
   const cabin2    = buildCabin('cabin-2')
-  const worker1   = buildStartingWorker('worker-1')
-  const worker2   = buildStartingWorker('worker-2')
+  const usedStartingNames = new Set<string>()
+  const worker1   = buildStartingWorker('worker-1', usedStartingNames)
+  usedStartingNames.add(worker1.name)
+  const worker2   = buildStartingWorker('worker-2', usedStartingNames)
 
   cabin1.occupants = [worker1.id]
   cabin2.occupants = [worker2.id]
@@ -921,7 +974,24 @@ function buildCabin(id: string) {
   }
 }
 
-const WORKER_NAMES = ['Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Tom', 'Hannah', 'Elias', 'Ruth']
+// Historically grounded 17th-century Carolina names.
+// Drawn from colonial records, court documents, and plantation inventories
+// of the period. Intentionally varied — enslaved, indentured, and free
+// workers are all drawn from the same pool; the labor type record carries
+// the legal distinction, not the name.
+// "Toby" excluded deliberately.
+const WORKER_NAMES = [
+  // Enslaved and free Black names documented in colonial Carolina records
+  'Solomon', 'Phoebe', 'Caesar', 'Dinah', 'Elias', 'Ruth', 'Cuffee', 'Flora',
+  'Mingo', 'Bess', 'Quash', 'Nanny', 'Prince', 'Violet', 'London', 'Grace',
+  'Sampson', 'Venus', 'Scipio', 'Dorcas', 'Nero', 'Hagar', 'Pompey', 'Sukey',
+  'Bristol', 'Phillis', 'July', 'Jenny', 'Cudjoe', 'Sybil',
+  // White indentured and free wage names from the same period
+  'Thomas', 'Hannah', 'William', 'Mary', 'James', 'Elizabeth', 'John', 'Sarah',
+  'Robert', 'Margaret', 'Edward', 'Anne', 'Henry', 'Alice', 'Richard', 'Jane',
+  'Patrick', 'Bridget', 'Michael', 'Catherine', 'Cornelius', 'Agnes',
+  'Heinrich', 'Greta', 'Pieter', 'Annetje',
+]
 
 // Short labels used in transaction log descriptions (hire/release).
 // Full descriptive labels for the planner UI live in SeasonPlanner.tsx.
@@ -933,8 +1003,10 @@ const HIRE_LABOR_SHORT_LABELS: Record<LaborType, string> = {
   [LaborType.FreeWage]:          'Free Wage',
 }
 
-function buildStartingWorker(id: string) {
-  const name = WORKER_NAMES[Math.floor(Math.random() * WORKER_NAMES.length)]
+function buildStartingWorker(id: string, usedNames: Set<string> = new Set()) {
+  const availableNames = WORKER_NAMES.filter(n => !usedNames.has(n))
+  const namePool = availableNames.length > 0 ? availableNames : WORKER_NAMES
+  const name = namePool[Math.floor(Math.random() * namePool.length)]
   return {
     id,
     name,

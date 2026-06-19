@@ -128,7 +128,7 @@ export function processQueuedSales(params: {
   const salesRejected: RejectedSale[] = []
   const updatedInventory = { ...storage.inventory }
 
-  for (const sale of sales) {
+  for (let sale of sales) {
     if (currentFactor.relationshipScore < 20 && currentFactor.advanceOutstanding > currentFactor.creditLimit) {
       salesRejected.push({
         saleId: sale.id,
@@ -138,12 +138,20 @@ export function processQueuedSales(params: {
     }
 
     const available = updatedInventory[sale.crop] ?? 0
-    if (available < sale.quantity) {
+    // If spoilage has reduced inventory below the queued quantity,
+    // sell whatever remains rather than rejecting the sale entirely.
+    // Only reject if nothing is left to sell.
+    const effectiveQuantity = Math.min(sale.quantity, available)
+    if (effectiveQuantity <= 0) {
       salesRejected.push({
         saleId: sale.id,
-        reason: `Only ${available} units of ${sale.crop} in storage; ${sale.quantity} requested.`,
+        reason: `No ${sale.crop} remaining in storage — spoilage may have consumed the stock.`,
       })
       continue
+    }
+    if (effectiveQuantity < sale.quantity) {
+      // Partial fill — log it but proceed
+      sale = { ...sale, quantity: effectiveQuantity }
     }
 
     const currentPrice = market.prices[sale.crop] ?? 0

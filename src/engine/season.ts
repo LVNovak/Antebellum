@@ -47,6 +47,10 @@ import {
   TEND_MAX_MITIGATION,
   LABOR_UPKEEP,
   LABOR_SEASONAL_COST,
+  FREEDOM_DUES_CORN_UNITS,
+  FREEDOM_DUES_CASH,
+  FREEDOM_DUES_BUYOUT_CASH,
+  CROP_COMPOST_YIELD_CHANCE,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
@@ -98,6 +102,14 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const newRemaining = Math.max(0, tile.clearingProgressRemaining - progressThisSeason)
     const justCleared  = newRemaining === 0
 
+    // Crop clearing — workers clearing a tile that has a standing crop
+    // generate some compost material from the plant matter being removed.
+    if (workersAssigned > 0 && !justCleared && tile.currentCrop) {
+      if (Math.random() < CROP_COMPOST_YIELD_CHANCE.clearing * workersAssigned) {
+        next.clearedMaterialOnHand = (next.clearedMaterialOnHand ?? 0) + 1
+      }
+    }
+
     if (justCleared) {
       const materialYield = CLEARED_MATERIAL_YIELD[tile.terrain]
       next.clearedMaterialOnHand += materialYield
@@ -132,6 +144,13 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // ── Step 3: Update soil on all cleared tiles ──────────────────────────────
   const tendingWorkersByTile = countWorkersByTask(next.workers, 'TendCrop')
+
+  // Tending generates compost material from weeding/pruning across all tiles
+  for (const [, workerCount] of tendingWorkersByTile) {
+    if (workerCount > 0 && Math.random() < CROP_COMPOST_YIELD_CHANCE.tending * workerCount) {
+      next.clearedMaterialOnHand = (next.clearedMaterialOnHand ?? 0) + 1
+    }
+  }
 
   next.tiles = next.tiles.map(tile => {
     if (!tile.isCleared) return tile  // uncleared tiles don't change
@@ -276,6 +295,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
               // (farmer always saves seed from harvest — no quantity tracking yet)
               if (!next.seedInventory) next.seedInventory = {}
               next.seedInventory[tile.currentCrop] = 1
+
+              // Harvest generates compost material from plant residue
+              if (Math.random() < CROP_COMPOST_YIELD_CHANCE.harvesting * workersHarvesting) {
+                next.clearedMaterialOnHand = (next.clearedMaterialOnHand ?? 0) + 1
+              }
             }
           }
         }
@@ -586,12 +610,32 @@ export function resolveSeasonEnd(state: GameState): GameState {
     const newRemaining = worker.contractSeasonsRemaining - 1
 
     if (newRemaining <= 0) {
+      // Freedom dues — pay corn from stores + cash (standard), or cash buyout
+      // Player presented with choice via event; default is standard dues.
+      // For now we auto-apply standard dues and flag the event so the player
+      // sees what was paid. Cash-buyout option is offered in the event effects.
+      const cornAvailable = next.cornOnHand ?? 0
+      const cornPaid = Math.min(FREEDOM_DUES_CORN_UNITS, cornAvailable)
+      next.cornOnHand = cornAvailable - cornPaid
+      next.finances.cashOnHand -= FREEDOM_DUES_CASH
+
+      next.transactionLog.push(recordTransaction({
+        description: `Freedom dues paid to ${worker.name} — ${cornPaid} corn + $${FREEDOM_DUES_CASH} cash (or pay $${FREEDOM_DUES_BUYOUT_CASH} buyout instead)`,
+        amount: -FREEDOM_DUES_CASH,
+        newCashOnHand: next.finances.cashOnHand,
+        season, year,
+      }))
+
       events.push({
         id: generateId(), season, year,
         category: 'Labor',
         title: 'Indenture Term Complete',
-        description: `${worker.name}'s indenture contract has ended. You may offer wage employment, release them, or attempt to renegotiate terms.`,
-        effects: ['Worker is now free — renegotiate or release in the Labor Roster'],
+        description: `${worker.name}'s indenture has ended. Freedom dues of ${cornPaid} corn and $${FREEDOM_DUES_CASH} have been paid. They are now free — offer wage employment or release them in the Labor Roster.`,
+        effects: [
+          `${cornPaid} corn drawn from your stores`,
+          `$${FREEDOM_DUES_CASH} cash paid as freedom dues`,
+          `Alternative: pay $${FREEDOM_DUES_BUYOUT_CASH} cash buyout (no corn) — release via Labor Roster`,
+        ],
       })
       // Convert to free wage on expiry — player can release via the roster
       return {
