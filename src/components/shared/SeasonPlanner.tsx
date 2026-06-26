@@ -471,7 +471,7 @@ export default function SeasonPlanner() {
                     const seasonalCost = LABOR_SEASONAL_COST[laborType].min
                     const canAfford = finances.cashOnHand >= cost && cabinSpaceAvailable > 0
                     const costLabel = laborType === LaborType.EnslavedPurchased
-                      ? 'Provisions only (corn + blankets)'
+                      ? 'Provisions only (food + blankets)'
                       : `~$${seasonalCost}/season`
                     return (
                       <div key={laborType} className="flex items-center justify-between">

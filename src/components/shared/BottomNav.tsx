@@ -21,7 +21,7 @@ export default function BottomNav() {
   const setActivePanel = useGameStore(s => s.setActivePanel)
 
   return (
-    <nav className="bg-earth-800 border-t border-earth-700 flex">
+    <nav className="bg-earth-800 border-t border-earth-700 flex" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
       {NAV_ITEMS.map(item => (
         <button
           key={item.id}

@@ -25,7 +25,7 @@ export default function GameLayout() {
   const activePanel = useGameStore(s => s.activePanel)
 
   return (
-    <div className="flex flex-col h-screen max-h-screen overflow-hidden">
+    <div className="flex flex-col overflow-hidden" style={{ height: "100dvh" }}>
       <TopBar />
       <main className="flex-1 overflow-y-auto panel-scroll">
         {activePanel === 'map'     && <PlantationMap />}

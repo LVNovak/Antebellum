@@ -2,10 +2,13 @@
  * Ledger.tsx — Financial dashboard
  */
 
+import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
 
 export default function Ledger() {
-  const gameState = useGameStore(s => s.gameState)
+  const gameState  = useGameStore(s => s.gameState)
+  const repayDebt  = useGameStore(s => s.repayDebt)
+  const [repayAmt, setRepayAmt] = useState(0)
   if (!gameState) return null
 
   const { finances } = gameState
@@ -36,7 +39,7 @@ export default function Ledger() {
         </div>
       </div>
 
-      {/* Debt breakdown */}
+      {/* Debt breakdown + manual repayment */}
       {totalDebt > 0 && (
         <div className="bg-earth-800 border border-earth-700 rounded p-4">
           <h3 className="font-serif text-earth-200 text-sm mb-3">Debt Obligations</h3>
@@ -49,6 +52,29 @@ export default function Ledger() {
           {finances.personalNoteDebt > 0 && (
             <DebtRow label="Personal note" amount={finances.personalNoteDebt} />
           )}
+          {/* Manual repayment */}
+          <div className="mt-4 pt-3 border-t border-earth-700">
+            <p className="text-earth-400 text-xs mb-2">Repay principal directly (factor advance first, then personal note)</p>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={Math.floor(Math.min(finances.cashOnHand, totalDebt))}
+                value={repayAmt || ''}
+                onChange={e => setRepayAmt(Math.max(0, Math.floor(Number(e.target.value))))}
+                placeholder="$0"
+                className="w-24 px-2 py-1 text-xs bg-earth-700 border border-earth-600 rounded text-earth-200"
+              />
+              <button
+                onClick={() => { repayDebt(repayAmt); setRepayAmt(0) }}
+                disabled={repayAmt <= 0 || repayAmt > finances.cashOnHand || totalDebt <= 0}
+                className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+              >
+                Repay
+              </button>
+              <span className="text-earth-500 text-[10px]">cash: ${finances.cashOnHand.toFixed(0)}</span>
+            </div>
+          </div>
         </div>
       )}
 

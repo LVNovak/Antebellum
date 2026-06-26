@@ -29,7 +29,7 @@ export default function TopBar() {
   }
 
   return (
-    <header className="bg-earth-800 border-b border-earth-700 px-4 py-3 relative">
+    <header className="bg-earth-800 border-b border-earth-700 px-4 py-3 relative" style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}>
       <div className="flex items-center justify-between">
         <div>
           <div className="font-serif text-earth-100 text-base font-bold">
@@ -47,7 +47,7 @@ export default function TopBar() {
               </span>
             )}
             <span className="text-earth-400 text-xs">
-              Corn: <span className={`font-mono font-bold ${cornLow ? 'text-soil-poor' : 'text-earth-200'}`}>
+              Food: <span className={`font-mono font-bold ${cornLow ? 'text-soil-poor' : 'text-earth-200'}`}>
                 {cornOnHand}
               </span>
             </span>

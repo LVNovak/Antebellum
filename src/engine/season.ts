@@ -51,6 +51,7 @@ import {
   FREEDOM_DUES_CASH,
   FREEDOM_DUES_BUYOUT_CASH,
   CROP_COMPOST_YIELD_CHANCE,
+  CROP_WEATHER_RESISTANCE,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
@@ -243,14 +244,38 @@ export function resolveSeasonEnd(state: GameState): GameState {
     // Player committed their harvest plan before advancing; frost is a
     // consequence of NOT harvesting, not a random wipe of planned work.
     if (frostDestroyed && workersHarvesting === 0) {
-      events.push({
-        id: generateId(), season, year,
-        category: 'Weather',
-        title: 'Early Frost — Crops Destroyed',
-        description: 'An early frost destroyed an unharvested crop on one of your fields.',
-        effects: ['Harvest lost on this tile'],
-      })
-      tile.currentCrop = null  // clear the destroyed crop
+      // Subsistence crops (corn, sweet potato, cowpeas) partially survive
+      // early frost — they mature faster and/or are hardier than tobacco.
+      // Their CROP_WEATHER_RESISTANCE[EarlyFrost] gives a partial yield
+      // even without harvest workers.
+      const cropFrostResistance = tile.currentCrop
+        ? (CROP_WEATHER_RESISTANCE[tile.currentCrop]?.[WeatherEvent.EarlyFrost] ?? 0)
+        : 0
+      if (cropFrostResistance > 0) {
+        // Partial yield — treat as a reduced harvest (no workers needed, frost did the threshing)
+        const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop!] ?? 0
+        const soilModifier = computeYieldModifierFromSoil(tile.soil)
+        const partialYield = Math.floor(baseYield * soilModifier * cropFrostResistance)
+        if (partialYield > 0) {
+          harvestedCorn += partialYield  // food crops go to provisions
+          events.push({
+            id: generateId(), season, year,
+            category: 'Weather',
+            title: 'Early Frost — Partial Harvest Saved',
+            description: 'Frost hit but the hardier crop yielded ' + partialYield + ' units before it was fully destroyed.',
+            effects: [partialYield + ' units salvaged to provisions'],
+          })
+        }
+      } else {
+        events.push({
+          id: generateId(), season, year,
+          category: 'Weather',
+          title: 'Early Frost — Crops Destroyed',
+          description: 'An early frost destroyed an unharvested crop on one of your fields.',
+          effects: ['Harvest lost on this tile'],
+        })
+      }
+      tile.currentCrop = null
     } else {
       if (workersHarvesting > 0) {
         const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
@@ -263,13 +288,24 @@ export function resolveSeasonEnd(state: GameState): GameState {
             : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
           const weatherModifier = Math.min(1.0, baseWeatherModifier + tendingMitigation)
 
+          // Apply per-crop weather resistance — subsistence crops (corn,
+          // sweet potato, cowpeas) are more resilient than tobacco.
+          // Resistance values override the base weather modifier for that crop.
+          const cropResistance = CROP_WEATHER_RESISTANCE[tile.currentCrop]
+          const effectiveWeatherModifier = cropResistance?.[weather] !== undefined
+            ? Math.max(weatherModifier, cropResistance[weather]!)
+            : weatherModifier
+
           const isRiceDestroyedByDrought = tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
 
           if (!isRiceDestroyedByDrought) {
-            yieldProduced = Math.floor(baseYield * soilModifier * weatherModifier)
+            yieldProduced = Math.floor(baseYield * soilModifier * effectiveWeatherModifier)
 
             if (yieldProduced > 0) {
-              if (tile.currentCrop === CropType.Corn || tile.currentCrop === CropType.SweetPotato) {
+              // Food crops (corn, sweet potato, cowpeas) go to provisions, not storage.
+            // Cowpeas' primary value is soil nitrogen restoration, but the harvest
+            // yield feeds the workforce rather than sitting unsellable in storage.
+            if (tile.currentCrop === CropType.Corn || tile.currentCrop === CropType.SweetPotato || tile.currentCrop === CropType.Cowpeas) {
                 harvestedCorn += yieldProduced
               } else {
                 const currentStored = getTotalStoredUnits(next.storage)
@@ -349,7 +385,40 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   next.storage             = saleResult.updatedStorage
   next.finances.factor     = saleResult.updatedFactor
-  next.finances.cashOnHand += saleResult.revenue
+
+  // Waterfall repayment: sale proceeds clear interest-accrued debt first,
+  // then reduce principal, remainder goes to cashOnHand.
+  // Historically, the factor took their share off the top before remitting
+  // anything to the planter — commission is already deducted in saleResult.revenue.
+  let saleProceeds = saleResult.revenue
+  const debtBefore = next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt
+  if (saleProceeds > 0 && debtBefore > 0.01) {
+    // Apply to factor advance first (most urgent — highest compounding risk)
+    if (next.finances.factorAdvanceDebt > 0.01) {
+      const payment = Math.min(saleProceeds, next.finances.factorAdvanceDebt)
+      next.finances.factorAdvanceDebt -= payment
+      saleProceeds -= payment
+      next.transactionLog.push(recordTransaction({
+        description: 'Factor advance repaid from sale proceeds: $' + payment.toFixed(2),
+        amount: -payment,
+        newCashOnHand: next.finances.cashOnHand,
+        season, year,
+      }))
+    }
+    // Then personal note
+    if (saleProceeds > 0 && next.finances.personalNoteDebt > 0.01) {
+      const payment = Math.min(saleProceeds, next.finances.personalNoteDebt)
+      next.finances.personalNoteDebt -= payment
+      saleProceeds -= payment
+      next.transactionLog.push(recordTransaction({
+        description: 'Personal note repaid from sale proceeds: $' + payment.toFixed(2),
+        amount: -payment,
+        newCashOnHand: next.finances.cashOnHand,
+        season, year,
+      }))
+    }
+  }
+  next.finances.cashOnHand += saleProceeds
 
   // Rejected sales persist to next season — don't silently drop them
   next.finances.queuedSales = saleResult.salesRejected
@@ -562,35 +631,60 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
-  // Apply interest on outstanding debts
+  // Interest accrual
+  // Grace period: no interest until after the first Autumn (season 4).
+  // Factors expected repayment from the first crop, not before it existed.
+  const INTEREST_GRACE_SEASONS = 3
+  const interestActive = seasonsPlayed > INTEREST_GRACE_SEASONS
+
   const factorInterestRate   = FINANCE_RATES.factorAdvancePerSeason.min
   const mortgageInterestRate = FINANCE_RATES.landMortgagePerYear.min / 4
   const noteInterestRate     = FINANCE_RATES.personalNotePerYear.min / 4
 
-  const factorInterestAccrued   = next.finances.factorAdvanceDebt * factorInterestRate
-  const mortgageInterestAccrued = next.finances.mortgageDebt * mortgageInterestRate
-  const noteInterestAccrued     = next.finances.personalNoteDebt * noteInterestRate
+  const factorInterestAccrued   = interestActive ? next.finances.factorAdvanceDebt * factorInterestRate   : 0
+  const mortgageInterestAccrued = interestActive ? next.finances.mortgageDebt * mortgageInterestRate       : 0
+  const noteInterestAccrued     = interestActive ? next.finances.personalNoteDebt * noteInterestRate       : 0
 
-  next.finances.factorAdvanceDebt *= (1 + factorInterestRate)
-  next.finances.mortgageDebt      *= (1 + mortgageInterestRate)
-  next.finances.personalNoteDebt  *= (1 + noteInterestRate)
+  if (interestActive) {
+    next.finances.factorAdvanceDebt *= (1 + factorInterestRate)
+    next.finances.mortgageDebt      *= (1 + mortgageInterestRate)
+    next.finances.personalNoteDebt  *= (1 + noteInterestRate)
+  }
 
   const totalInterestAccrued = factorInterestAccrued + mortgageInterestAccrued + noteInterestAccrued
   if (totalInterestAccrued > 0.01) {
     next.transactionLog.push(recordTransaction({
-      description:   `Interest accrued on outstanding debt (+$${totalInterestAccrued.toFixed(2)} owed)`,
+      description:   'Interest accrued on outstanding debt (+$' + totalInterestAccrued.toFixed(2) + ' owed)',
+      amount:        0,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  } else if (!interestActive && (next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt) > 0.01) {
+    next.transactionLog.push(recordTransaction({
+      description:   'Factor advance grace period active — no interest charged until after first harvest season',
       amount:        0,
       newCashOnHand: next.finances.cashOnHand,
       season, year,
     }))
   }
 
-  // Check for foreclosure (grace period: first 4 seasons)
+  // Foreclosure check
+  // Grace period: first 4 seasons (give the player time to plant and sell).
+  // Warning throttled: fires once when the threshold is crossed, then only
+  // when the ratio meaningfully worsens (not every season).
   const FORECLOSURE_GRACE_PERIOD_SEASONS = 4
   const pastGracePeriod = seasonsPlayed > FORECLOSURE_GRACE_PERIOD_SEASONS
   const totalDebt   = next.finances.factorAdvanceDebt + next.finances.mortgageDebt + next.finances.personalNoteDebt
   const totalAssets = next.finances.cashOnHand + estimateAssetValue(next)
-  if (pastGracePeriod && totalDebt > totalAssets * 1.5) {
+  const debtRatio   = totalAssets > 0 ? totalDebt / totalAssets : Infinity
+  // Only warn when ratio crosses 1.5 for the first time, or worsens past 2.0, 3.0
+  const prevDebtRatio = state.finances.factorAdvanceDebt + state.finances.mortgageDebt + state.finances.personalNoteDebt > 0
+    ? (state.finances.factorAdvanceDebt + state.finances.mortgageDebt + state.finances.personalNoteDebt) /
+      Math.max(1, state.finances.cashOnHand + estimateAssetValue(state))
+    : 0
+  const crossedWarningThreshold = pastGracePeriod && debtRatio > 1.5 &&
+    (prevDebtRatio <= 1.5 || (debtRatio > 2.0 && prevDebtRatio <= 2.0) || (debtRatio > 3.0 && prevDebtRatio <= 3.0))
+  if (crossedWarningThreshold) {
     events.push({
       id: generateId(), season, year,
       category: 'Economic',

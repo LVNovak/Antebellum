@@ -463,11 +463,19 @@ export const CROP_REQUIRES_WATER: Record<CropType, boolean> = {
 
 // Interest rates — per annum unless noted
 export const FINANCE_RATES = {
-  factorAdvancePerSeason: { min: 0.08,  max: 0.12 },  // 8-12% per season
+  // Factor advance: 8-12% per YEAR (2-3% per season).
+  // Previous 8-12%/season was ~30%/year — historically inaccurate and
+  // made the loan unserviceable before a first harvest.
+  factorAdvancePerSeason: { min: 0.02,  max: 0.03 },  // 8-12% per year ÷ 4
   landMortgagePerYear:    { min: 0.06,  max: 0.09 },  // 6-9% per annum
   personalNotePerYear:    { min: 0.12,  max: 0.18 },  // 12-18% per annum
   factorCommission:       { min: 0.025, max: 0.05 },  // 2.5-5% of sale value
 }
+
+// Factor advance sizing formula:
+// advance = clearedTiles × TOBACCO_BASE_YIELD × tobaccoMinPrice × FACTOR_ADVANCE_RATE
+// Factors historically advanced 50-70% of estimated Year 1 crop value.
+export const FACTOR_ADVANCE_RATE = 0.60
 
 // Starting cash and credit by capital choice
 export const STARTING_CAPITAL = {
@@ -614,6 +622,32 @@ export const WEATHER_YIELD_MODIFIER: Record<WeatherEvent, number> = {
   [WeatherEvent.HeavyRain]:  0.88,   // -12% average
   [WeatherEvent.Storm]:      0.70,   // -30% average; tobacco hit hardest
   [WeatherEvent.EarlyFrost]: 0.00,   // 0% — destroys all unharvested crops
+}
+
+/**
+ * Per-crop weather resistance overrides.
+ * Applied multiplicatively on top of the base weather modifier for that crop.
+ * A value of 1.0 means no override (base modifier applies).
+ *
+ * Corn and other subsistence crops are historically more resilient than
+ * tobacco — shorter season, deeper root systems, more drought-adapted.
+ * GDD §7.1: "Corn: stable. Tobacco: depletes fastest."
+ *
+ * Sweet potato and cowpeas inherit corn-like resilience as subsistence crops.
+ */
+export const CROP_WEATHER_RESISTANCE: Partial<Record<CropType, Partial<Record<WeatherEvent, number>>>> = {
+  [CropType.Corn]: {
+    [WeatherEvent.Drought]:    0.70,  // replaces 0.45 — partial loss, not wipeout
+    [WeatherEvent.EarlyFrost]: 0.40,  // replaces 0.00 — corn matures faster, partial yield survives
+  },
+  [CropType.SweetPotato]: {
+    [WeatherEvent.Drought]:    0.65,  // tubers hold moisture better than leaf crops
+    [WeatherEvent.EarlyFrost]: 0.35,  // partially underground; some survives
+  },
+  [CropType.Cowpeas]: {
+    [WeatherEvent.Drought]:    0.60,  // legumes are drought-adapted
+    [WeatherEvent.EarlyFrost]: 0.30,  // summer crop; frost hits but partial yield
+  },
 }
 
 /**

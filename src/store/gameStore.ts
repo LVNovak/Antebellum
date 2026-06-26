@@ -42,6 +42,8 @@ import {
   SEED_PURCHASE_COST,
   COMPOST_FACILITY_COST,
   COVER_CROP_SEED_STOCK_COST,
+  FACTOR_ADVANCE_RATE,
+  CROP_BASE_YIELD_PER_TILE,
 } from '@engine/constants'
 
 // ---------------------------------------------------------------------------
@@ -102,6 +104,7 @@ interface GameStore {
   queueSale:              (crop: CropType, quantity: number, minPrice: number | null) => void
   cancelSale:             (saleId: string) => void
   updateSaleQuantity:     (saleId: string, newQuantity: number) => void
+  repayDebt:              (amount: number) => void
 
   // Land and labor acquisition
   buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
@@ -635,6 +638,53 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
+  // ── Manual debt repayment ─────────────────────────────────────────────────
+  repayDebt: (amount) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const available = Math.min(amount, gameState.finances.cashOnHand)
+    if (available <= 0) return
+
+    let remaining = available
+    let newFactorDebt = gameState.finances.factorAdvanceDebt
+    let newNoteDebt   = gameState.finances.personalNoteDebt
+
+    // Waterfall: factor advance first, then personal note
+    if (newFactorDebt > 0) {
+      const payment = Math.min(remaining, newFactorDebt)
+      newFactorDebt -= payment
+      remaining     -= payment
+    }
+    if (remaining > 0 && newNoteDebt > 0) {
+      const payment = Math.min(remaining, newNoteDebt)
+      newNoteDebt -= payment
+      remaining   -= payment
+    }
+
+    const paid = available - remaining
+    if (paid <= 0) return
+
+    const newCash = gameState.finances.cashOnHand - paid
+    const updated: GameState = {
+      ...gameState,
+      finances: {
+        ...gameState.finances,
+        cashOnHand:        newCash,
+        factorAdvanceDebt: newFactorDebt,
+        personalNoteDebt:  newNoteDebt,
+      },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   'Manual debt repayment: $' + paid.toFixed(2) + ' applied to principal',
+        amount:        -paid,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
   // ── Build a new cabin ─────────────────────────────────────────────────────
   buildNewCabin: () => {
     const { gameState } = get()
@@ -824,7 +874,10 @@ function buildInitialGameState(params: NewGameParams): GameState {
   cabin1.occupants = [worker1.id]
   cabin2.occupants = [worker2.id]
 
-  const { cashOnHand, factorAdvance, personalNote } = getStartingFinances(startingCapital)
+  // Count cleared starting tiles to size the factor advance correctly.
+  // All starting tiles are pre-cleared upland; uncleared tiles need labour first.
+  const clearedStartingTiles = [grantTile].filter(t => t.isCleared).length
+  const { cashOnHand, factorAdvance, personalNote } = getStartingFinances(startingCapital, clearedStartingTiles)
 
   return {
     version:         '0.5.0',
@@ -1021,13 +1074,32 @@ function buildStartingWorker(id: string, usedNames: Set<string> = new Set()) {
   }
 }
 
-function getStartingFinances(capital: StartingCapital) {
+/**
+ * Calculate the factor advance for the FinancedEntry path.
+ *
+ * Historically, factors advanced 50-70% of the estimated Year 1 crop value.
+ * We size against actual starting cleared tiles so the advance is always
+ * serviceable by a first harvest — a factor would not advance more than
+ * the crop can cover, since an insolvent planter is a bad debtor.
+ *
+ * Formula: clearedTiles × baseYieldPerTile × tobaccoStartPrice × advanceRate
+ */
+function computeFactorAdvance(clearedTileCount: number): number {
+  const TOBACCO_START_PRICE = 12  // matches market.prices[Tobacco] at game start
+  const baseYield = CROP_BASE_YIELD_PER_TILE[CropType.Tobacco] ?? 24
+  const estimated = clearedTileCount * baseYield * TOBACCO_START_PRICE * FACTOR_ADVANCE_RATE
+  // Round to nearest 0 for a clean ledger entry; minimum /bin/sh
+  return Math.max(0, Math.round(estimated / 10) * 10)
+}
+
+function getStartingFinances(capital: StartingCapital, clearedTileCount: number = 2) {
+  const factorAdvance = computeFactorAdvance(clearedTileCount)
   switch (capital) {
     case StartingCapital.CashBuyer:
-      return { cashOnHand: 1000, factorAdvance: 0,   personalNote: 0   }
+      return { cashOnHand: 1000, factorAdvance: 0,             personalNote: 0   }
     case StartingCapital.FinancedEntry:
-      return { cashOnHand: 300,  factorAdvance: 750, personalNote: 0   }
+      return { cashOnHand: 300,  factorAdvance,                personalNote: 0   }
     case StartingCapital.FamilyLoan:
-      return { cashOnHand: 500,  factorAdvance: 0,   personalNote: 400 }
+      return { cashOnHand: 500,  factorAdvance: 0,             personalNote: 400 }
   }
 }
