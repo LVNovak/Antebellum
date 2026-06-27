@@ -117,7 +117,6 @@ export default function SeasonPlanner() {
     setQueueFlash(p => ({ ...p, [crop]: true }))
     setTimeout(() => setQueueFlash(p => ({ ...p, [crop]: false })), 600)
   }
-  const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
 
   if (!gameState) return null
 
