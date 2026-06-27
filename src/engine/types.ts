@@ -177,6 +177,7 @@ export interface Tile {
   isWaterAdjacent: boolean    // required for rice cultivation
   soil:         SoilHealth    // hidden from player; drives qualitative hints
   currentCrop:  CropType | null  // what's planted this season (null = unused)
+  seasonsInGround: number     // how many seasons this crop has been growing (0 = just planted)
   hasStumpRot:  boolean       // true for 1-2 seasons after clearing; suppresses SF
   stumpRotSeasonsLeft: number // countdown to stump rot clearing
 

@@ -415,6 +415,48 @@ export const CROP_BASE_YIELD_PER_TILE: Record<CropType, number> = {
 }
 
 /**
+ * Minimum seasons a crop must be in the ground before harvest is possible.
+ * A crop planted this season has seasonsInGround = 0; it becomes harvestable
+ * once seasonsInGround >= CROP_MIN_SEASONS_TO_HARVEST.
+ *
+ * Historical basis:
+ *   Tobacco: Spring planting, 3 months to prime, cured in Autumn — needs 2 seasons
+ *   Corn: 90-120 days — 1 season minimum
+ *   Cowpeas: 60-90 days — 1 season
+ *   Sweet potato: 90-120 days — 1 season
+ */
+export const CROP_MIN_SEASONS_TO_HARVEST: Partial<Record<CropType, number>> = {
+  [CropType.Tobacco]:     2,   // Spring plant → minimum Summer, ideally Autumn
+  [CropType.Rice]:        2,   // Spring plant → minimum Summer, ideally Autumn
+  [CropType.Indigo]:      2,
+  [CropType.Corn]:        1,   // one season sufficient
+  [CropType.Cowpeas]:     1,
+  [CropType.SweetPotato]: 1,
+}
+
+/**
+ * Yield scale by seasons in ground, as a fraction of full yield.
+ * Applied as a multiplier on top of the normal soil/weather calculation.
+ *
+ * seasonsInGround is incremented each season the crop is present.
+ * A crop just planted = 0. After one season grows = 1. Etc.
+ *
+ * For tobacco: minimum 2 seasons means first harvestable at seasonsInGround=2.
+ * At exactly the minimum, yield is scaled down (early harvest penalty).
+ * At the optimal season, full yield.
+ */
+export const CROP_YIELD_SCALE_BY_SEASONS: Partial<Record<CropType, number[]>> = {
+  // Index = seasonsInGround at harvest time. [0] = same season (blocked by min).
+  // Values beyond array length = use last value (crop doesn't improve further).
+  [CropType.Tobacco]:     [0, 0, 0.70, 1.00, 0.90],  // peaks at 3 seasons, slight decline at 4+
+  [CropType.Rice]:        [0, 0, 0.75, 1.00, 0.90],
+  [CropType.Indigo]:      [0, 0, 0.75, 1.00],
+  [CropType.Corn]:        [0, 1.00, 1.00],            // full yield from 1 season onward
+  [CropType.Cowpeas]:     [0, 1.00, 1.00],
+  [CropType.SweetPotato]: [0, 0.85, 1.00, 0.95],
+}
+
+/**
  * Seed economy — Phase 1 simple model.
  *
  * SEED_PURCHASE_COST: one-time cost to acquire seed stock for a crop.

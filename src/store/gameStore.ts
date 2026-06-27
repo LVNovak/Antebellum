@@ -205,7 +205,7 @@ function applyPlanToTiles(state: GameState, plan: SeasonPlan): GameState['tiles'
   return state.tiles.map(tile => {
     const action = plan.tileAllocations[tile.id]
     if (!action || action.type !== 'Plant') return tile
-    return { ...tile, currentCrop: action.crop }
+    return { ...tile, currentCrop: action.crop, seasonsInGround: 0 }
   })
 }
 
@@ -447,6 +447,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       isWaterAdjacent,
       soil:                      { ...soilStart },
       currentCrop:               null as CropType | null,
+      seasonsInGround:           0,
       hasStumpRot:               false,
       stumpRotSeasonsLeft:       0,
       clearingProgressRemaining: LAND_CLEARING_COST[terrain],
@@ -1041,6 +1042,7 @@ function buildGrantTile(origin: Origin) {
       moistureRetention: 55,
     },
     currentCrop:               null,
+    seasonsInGround:           0,
     hasStumpRot:               false,
     stumpRotSeasonsLeft:       0,
     clearingProgressRemaining: config.isCleared ? 0 : LAND_CLEARING_COST[config.terrain],

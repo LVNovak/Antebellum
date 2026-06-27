@@ -27,6 +27,8 @@ import {
   STORAGE_CAPACITY_SMOKEHOUSE,
   STORAGE_CAPACITY_STOREHOUSE,
   LABOR_UNITS_PER_WORKER_PER_SEASON,
+  CROP_MIN_SEASONS_TO_HARVEST,
+  CROP_YIELD_SCALE_BY_SEASONS,
 } from '@engine/constants'
 
 type SelectedItem =
@@ -265,11 +267,36 @@ function TileDetail({ tile, workersClearingThisTile }: { tile: Tile; workersClea
 
       {tile.isCleared && (
         <>
-          {tile.currentCrop ? (
-            <p className="text-earth-300 text-sm">
-              Currently planted: <strong>{tile.currentCrop}</strong>
-            </p>
-          ) : (
+          {tile.currentCrop ? (() => {
+            const minSeasons   = CROP_MIN_SEASONS_TO_HARVEST[tile.currentCrop] ?? 1
+            const scaleTable   = CROP_YIELD_SCALE_BY_SEASONS[tile.currentCrop]
+            const scaleIdx     = Math.min(tile.seasonsInGround, (scaleTable?.length ?? 1) - 1)
+            const growthScale  = scaleTable?.[scaleIdx] ?? 1.0
+            const ready        = tile.seasonsInGround >= minSeasons
+            const optimal      = growthScale >= 1.0
+
+            let growthLabel: string
+            if (tile.seasonsInGround === 0) {
+              growthLabel = 'Just planted — needs time to establish'
+            } else if (!ready) {
+              growthLabel = `Still growing — ${minSeasons - tile.seasonsInGround} season(s) until ready to harvest`
+            } else if (optimal) {
+              growthLabel = 'Ready — at peak yield'
+            } else {
+              growthLabel = `Ready — ${Math.round(growthScale * 100)}% of peak yield (harvest soon)`
+            }
+
+            return (
+              <>
+                <p className="text-earth-300 text-sm">
+                  Currently planted: <strong>{tile.currentCrop}</strong>
+                </p>
+                <p className={`text-xs mt-0.5 ${ready ? (optimal ? 'text-soil-good' : 'text-earth-400') : 'text-earth-500'}`}>
+                  {growthLabel}
+                </p>
+              </>
+            )
+          })() : (
             <p className="text-earth-400 text-sm italic">No crop planted this season — ready to plant.</p>
           )}
 
