@@ -105,6 +105,7 @@ interface GameStore {
   cancelSale:             (saleId: string) => void
   updateSaleQuantity:     (saleId: string, newQuantity: number) => void
   repayDebt:              (amount: number) => void
+  requestFactorAdvance:   () => void
 
   // Land and labor acquisition
   buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
@@ -685,6 +686,36 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
+  // ── Request in-game factor advance ────────────────────────────────────────
+  requestFactorAdvance: () => {
+    const { gameState } = get()
+    if (!gameState) return
+
+    const clearedCount = gameState.tiles.filter(t => t.isCleared).length
+    const advance = computeFactorAdvance(clearedCount)
+    if (advance <= 0) return
+
+    const newCash = gameState.finances.cashOnHand + advance
+    const newFactorDebt = (gameState.finances.factorAdvanceDebt ?? 0) + advance
+    const updated: GameState = {
+      ...gameState,
+      finances: {
+        ...gameState.finances,
+        cashOnHand:        newCash,
+        factorAdvanceDebt: newFactorDebt,
+      },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   'Factor advance received: $' + advance.toFixed(0) + ' against estimated harvest',
+        amount:        advance,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
   // ── Build a new cabin ─────────────────────────────────────────────────────
   buildNewCabin: () => {
     const { gameState } = get()
@@ -1087,8 +1118,11 @@ function buildStartingWorker(id: string, usedNames: Set<string> = new Set()) {
 function computeFactorAdvance(clearedTileCount: number): number {
   const TOBACCO_START_PRICE = 12  // matches market.prices[Tobacco] at game start
   const baseYield = CROP_BASE_YIELD_PER_TILE[CropType.Tobacco] ?? 24
-  const estimated = clearedTileCount * baseYield * TOBACCO_START_PRICE * FACTOR_ADVANCE_RATE
-  // Round to nearest 0 for a clean ledger entry; minimum /bin/sh
+  // Apply a realistic soil/weather modifier (0.55) — average starting forest soil
+  // gives ~52% composite, so theoretical max yield is never actually achieved.
+  // The factor advances against what the operation can realistically produce.
+  const REALISTIC_YIELD_MODIFIER = 0.55
+  const estimated = clearedTileCount * baseYield * REALISTIC_YIELD_MODIFIER * TOBACCO_START_PRICE * FACTOR_ADVANCE_RATE
   return Math.max(0, Math.round(estimated / 10) * 10)
 }
 

@@ -107,7 +107,16 @@ export default function SeasonPlanner() {
   const [cornToBuy,    setCornToBuy]    = useState(0)
   const [blanketsToBuy, setBlanketsToBuy] = useState(0)
   const [saleQty,      setSaleQty]      = useState<Partial<Record<CropType, number>>>({})
+  const [saleQtyRaw,   setSaleQtyRaw]   = useState<Partial<Record<CropType, string>>>({})
   const [salePrice,    setSalePrice]    = useState<Partial<Record<CropType, number>>>({})
+  const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
+  const [queueFlash,   setQueueFlash]   = useState<Partial<Record<CropType, boolean>>>({})
+  const [buyFlash,     setBuyFlash]     = useState(false)
+
+  function flashQueue(crop: CropType) {
+    setQueueFlash(p => ({ ...p, [crop]: true }))
+    setTimeout(() => setQueueFlash(p => ({ ...p, [crop]: false })), 600)
+  }
   const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
 
   if (!gameState) return null
@@ -149,6 +158,8 @@ export default function SeasonPlanner() {
       buySupplies(cornToBuy, blanketsToBuy)
       setCornToBuy(0)
       setBlanketsToBuy(0)
+      setBuyFlash(true)
+      setTimeout(() => setBuyFlash(false), 600)
     }
   }
 
@@ -157,7 +168,9 @@ export default function SeasonPlanner() {
     const price = (salePrice[crop] && salePrice[crop]! > 0) ? salePrice[crop]! : null
     if (qty > 0) {
       queueSale(crop, qty, price)
-      setSaleQty(p  => ({ ...p, [crop]: 0 }))
+      setSaleQty(p    => ({ ...p, [crop]: 0 }))
+      setSaleQtyRaw(p => ({ ...p, [crop]: '' }))
+      flashQueue(crop)
     }
   }
 
@@ -242,8 +255,8 @@ export default function SeasonPlanner() {
     <div className="fixed inset-0 bg-black/80 z-40 flex items-end sm:items-center justify-center">
       <div className="bg-earth-900 border border-earth-700 sm:rounded-lg w-full max-w-lg max-h-[92vh] sm:max-h-[85vh] flex flex-col">
 
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-earth-700 flex items-center justify-between">
+        {/* Header — sticky, always visible while scrolling */}
+        <div className="sticky top-0 z-10 bg-earth-900 px-4 py-3 border-b border-earth-700 flex items-center justify-between">
           <div>
             <h2 className="font-serif text-earth-100 text-lg font-bold">
               Plan Your Season
@@ -256,6 +269,9 @@ export default function SeasonPlanner() {
             </div>
             <div className="text-earth-500 text-xs">
               {remaining > 0 ? `${remaining} resting` : overAllocated ? 'Over-allocated!' : 'All assigned'}
+            </div>
+            <div className={`font-mono text-xs mt-0.5 ${finances.cashOnHand >= 0 ? 'text-earth-400' : 'text-soil-poor'}`}>
+              ${finances.cashOnHand.toFixed(0)} cash
             </div>
           </div>
         </div>
@@ -530,7 +546,7 @@ export default function SeasonPlanner() {
                   <button
                     onClick={handleBuySupplies}
                     disabled={!canAffordSupplies}
-                    className="px-4 py-1.5 bg-earth-600 text-earth-100 rounded text-sm disabled:opacity-40"
+                    className={`px-4 py-1.5 rounded text-sm disabled:opacity-40 transition-colors duration-300 ${buyFlash ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                   >
                     {canAffordSupplies ? 'Buy' : 'Cannot Afford'}
                   </button>
@@ -651,11 +667,16 @@ export default function SeasonPlanner() {
                     </div>
                     <div className="flex gap-2">
                       <input
-                        type="number"
-                        min={0}
-                        max={available}
-                        value={saleQty[crop] ?? 0}
-                        onChange={e => setSaleQty(p => ({ ...p, [crop]: Math.min(available, Number(e.target.value)) }))}
+                        type="text"
+                        inputMode="numeric"
+                        value={saleQtyRaw[crop] ?? ''}
+                        onFocus={() => setSaleQtyRaw(p => ({ ...p, [crop]: saleQty[crop] ? String(saleQty[crop]) : '' }))}
+                        onChange={e => {
+                          const raw = e.target.value.replace(/[^0-9]/g, '')
+                          setSaleQtyRaw(p => ({ ...p, [crop]: raw }))
+                          const n = Math.min(available, parseInt(raw, 10) || 0)
+                          setSaleQty(p => ({ ...p, [crop]: n }))
+                        }}
                         placeholder="Qty"
                         className="w-20 bg-earth-800 border border-earth-600 text-earth-100 px-2 py-1 rounded text-sm"
                       />
@@ -665,7 +686,6 @@ export default function SeasonPlanner() {
                         value={salePrice[crop] ?? ''}
                         onChange={e => {
                           const val = Number(e.target.value)
-                          // 0 or empty = no price floor (null), not a floor of $0
                           setSalePrice(p => ({ ...p, [crop]: val > 0 ? val : undefined }))
                         }}
                         placeholder="Min $"
@@ -674,7 +694,7 @@ export default function SeasonPlanner() {
                       <button
                         onClick={() => handleQueueSale(crop)}
                         disabled={!saleQty[crop]}
-                        className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-sm disabled:opacity-40"
+                        className={`px-3 py-1 rounded text-sm disabled:opacity-40 transition-colors duration-300 ${queueFlash[crop] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                       >
                         Queue
                       </button>

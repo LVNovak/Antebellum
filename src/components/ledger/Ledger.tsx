@@ -6,14 +6,40 @@ import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
 
 export default function Ledger() {
-  const gameState  = useGameStore(s => s.gameState)
-  const repayDebt  = useGameStore(s => s.repayDebt)
-  const [repayAmt, setRepayAmt] = useState(0)
+  const gameState            = useGameStore(s => s.gameState)
+  const repayDebt            = useGameStore(s => s.repayDebt)
+  const requestFactorAdvance = useGameStore(s => s.requestFactorAdvance)
+  const [repayAmt, setRepayAmt]       = useState(0)
+  const [repayFlash, setRepayFlash]   = useState(false)
+  const [advanceFlash, setAdvanceFlash] = useState(false)
   if (!gameState) return null
 
-  const { finances } = gameState
-  const totalDebt = finances.factorAdvanceDebt + finances.mortgageDebt + finances.personalNoteDebt
-  const netPosition = finances.cashOnHand - totalDebt
+  const { finances, tiles } = gameState
+  const totalDebt    = finances.factorAdvanceDebt + finances.mortgageDebt + finances.personalNoteDebt
+  const netPosition  = finances.cashOnHand - totalDebt
+  const clearedCount = tiles.filter(t => t.isCleared).length
+  // Show estimated advance the factor would offer right now
+  const TOBACCO_START_PRICE    = 12
+  const REALISTIC_YIELD_MOD    = 0.55
+  const FACTOR_ADVANCE_RATE    = 0.60
+  const BASE_YIELD_PER_TILE    = 24
+  const estimatedAdvance = Math.round(
+    (clearedCount * BASE_YIELD_PER_TILE * REALISTIC_YIELD_MOD * TOBACCO_START_PRICE * FACTOR_ADVANCE_RATE) / 10
+  ) * 10
+  const canRequestAdvance = estimatedAdvance > 0 && finances.factorAdvanceDebt === 0
+
+  function handleRepay() {
+    repayDebt(repayAmt)
+    setRepayAmt(0)
+    setRepayFlash(true)
+    setTimeout(() => setRepayFlash(false), 600)
+  }
+
+  function handleRequestAdvance() {
+    requestFactorAdvance()
+    setAdvanceFlash(true)
+    setTimeout(() => setAdvanceFlash(false), 600)
+  }
 
   return (
     <div className="p-4 flex flex-col gap-4">
@@ -66,9 +92,9 @@ export default function Ledger() {
                 className="w-24 px-2 py-1 text-xs bg-earth-700 border border-earth-600 rounded text-earth-200"
               />
               <button
-                onClick={() => { repayDebt(repayAmt); setRepayAmt(0) }}
+                onClick={handleRepay}
                 disabled={repayAmt <= 0 || repayAmt > finances.cashOnHand || totalDebt <= 0}
-                className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${repayFlash ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
               >
                 Repay
               </button>
@@ -77,6 +103,28 @@ export default function Ledger() {
           </div>
         </div>
       )}
+
+      {/* Factor advance request */}
+      <div className="bg-earth-800 border border-earth-700 rounded p-4">
+        <h3 className="font-serif text-earth-200 text-sm mb-2">Factor Advance</h3>
+        {canRequestAdvance ? (
+          <>
+            <p className="text-earth-400 text-xs mb-3">
+              Your factor will advance against your estimated harvest. Based on {clearedCount} cleared tile{clearedCount !== 1 ? 's' : ''}, the offer is approximately <span className="text-earth-200">${estimatedAdvance}</span>. Repaid from sale proceeds at the end of the season.
+            </p>
+            <button
+              onClick={handleRequestAdvance}
+              className={`px-4 py-1.5 rounded text-sm transition-colors duration-300 ${advanceFlash ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100 hover:bg-earth-500'}`}
+            >
+              Request ${estimatedAdvance} advance
+            </button>
+          </>
+        ) : finances.factorAdvanceDebt > 0 ? (
+          <p className="text-earth-500 text-xs">Outstanding advance of ${finances.factorAdvanceDebt.toFixed(0)} must be repaid before requesting another.</p>
+        ) : (
+          <p className="text-earth-500 text-xs">No cleared land to advance against. Clear land first.</p>
+        )}
+      </div>
 
       {/* Factor relationship */}
       <div className="bg-earth-800 border border-earth-700 rounded p-4">

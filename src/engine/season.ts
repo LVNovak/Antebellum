@@ -298,8 +298,13 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
           const isRiceDestroyedByDrought = tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
 
+          // Workers assigned to harvest protect the tile from early frost —
+          // they collect before the frost hits. Override the 0.00 frost modifier.
+          const workerFrostProtection = frostDestroyed && workersHarvesting > 0
+          const finalWeatherModifier = workerFrostProtection ? 1.0 : effectiveWeatherModifier
+
           if (!isRiceDestroyedByDrought) {
-            yieldProduced = Math.floor(baseYield * soilModifier * effectiveWeatherModifier)
+            yieldProduced = Math.floor(baseYield * soilModifier * finalWeatherModifier)
 
             if (yieldProduced > 0) {
               // Food crops (corn, sweet potato, cowpeas) go to provisions, not storage.
@@ -620,14 +625,17 @@ export function resolveSeasonEnd(state: GameState): GameState {
     return { ...cabin, receivedMaintenanceThisSeason: false }
   })
 
-  // Cash upkeep shortfall check
+  // Cash upkeep shortfall check — convert negative cash to emergency debt
   if (next.finances.cashOnHand < 0) {
+    const shortfall = Math.abs(next.finances.cashOnHand)
+    next.finances.personalNoteDebt = (next.finances.personalNoteDebt ?? 0) + shortfall
+    next.finances.cashOnHand = 0
     events.push({
       id: generateId(), season, year,
       category: 'Economic',
       title: 'Cash Shortfall',
-      description: 'Upkeep costs exceeded available cash this season. Debt is growing.',
-      effects: ['Conditions Index may decline'],
+      description: `Upkeep exceeded available cash by $${shortfall.toFixed(0)}. A personal note covers the gap — debt is growing.`,
+      effects: [`$${shortfall.toFixed(0)} added to personal note debt`],
     })
   }
 

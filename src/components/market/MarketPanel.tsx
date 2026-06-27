@@ -2,6 +2,7 @@
  * MarketPanel.tsx — Storage inventory and market prices
  */
 
+import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
 import { CropType } from '@engine/types'
 
@@ -15,10 +16,22 @@ const CROP_LABELS: Partial<Record<CropType, string>> = {
 }
 
 export default function MarketPanel() {
-  const gameState = useGameStore(s => s.gameState)
+  const gameState  = useGameStore(s => s.gameState)
+  const queueSale  = useGameStore(s => s.queueSale)
+  const [sellQty,   setSellQty]   = useState<Partial<Record<CropType, string>>>({})
+  const [sellFlash, setSellFlash] = useState<Partial<Record<CropType, boolean>>>({})
   if (!gameState) return null
 
   const { storage, market, finances } = gameState
+
+  function handleQuickSell(crop: CropType, available: number) {
+    const n = Math.min(available, parseInt(sellQty[crop] ?? '', 10) || available)
+    if (n <= 0) return
+    queueSale(crop, n, null)
+    setSellQty(p => ({ ...p, [crop]: '' }))
+    setSellFlash(p => ({ ...p, [crop]: true }))
+    setTimeout(() => setSellFlash(p => ({ ...p, [crop]: false })), 600)
+  }
   const totalStored: number = Object.values(storage.inventory).reduce((s: number, q) => s + ((q as number) ?? 0), 0)
   const storageUsed: number = totalStored
   const storagePct  = storage.capacity > 0 ? Math.round((storageUsed / storage.capacity) * 100) : 0
@@ -55,14 +68,32 @@ export default function MarketPanel() {
               const price = market.prices[crop] ?? 0
               const value = qty * price
               return (
-                <div key={crop} className="flex justify-between items-center py-1.5 border-b border-earth-700 last:border-0">
-                  <div>
-                    <span className="text-earth-200 text-sm">{CROP_LABELS[crop] ?? crop}</span>
-                    <span className="text-earth-500 text-xs ml-2">{qty} units</span>
+                <div key={crop} className="py-1.5 border-b border-earth-700 last:border-0">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <span className="text-earth-200 text-sm">{CROP_LABELS[crop] ?? crop}</span>
+                      <span className="text-earth-500 text-xs ml-2">{qty} units</span>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-earth-300 text-xs">${price.toFixed(2)}/unit</div>
+                      <div className="text-earth-200 text-sm font-mono">${value.toFixed(0)}</div>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-earth-300 text-xs">${price.toFixed(2)}/unit</div>
-                    <div className="text-earth-200 text-sm font-mono">${value.toFixed(0)}</div>
+                  <div className="flex gap-2 mt-1.5 items-center">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={sellQty[crop] ?? ''}
+                      onChange={e => setSellQty(p => ({ ...p, [crop]: e.target.value.replace(/[^0-9]/g, '') }))}
+                      placeholder={`${qty}`}
+                      className="w-16 bg-earth-700 border border-earth-600 text-earth-100 px-2 py-0.5 rounded text-xs"
+                    />
+                    <button
+                      onClick={() => handleQuickSell(crop, qty)}
+                      className={`px-3 py-0.5 rounded text-xs transition-colors duration-300 ${sellFlash[crop] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100 hover:bg-earth-500'}`}
+                    >
+                      {sellQty[crop] ? `Queue ${sellQty[crop]}` : 'Queue all'}
+                    </button>
                   </div>
                 </div>
               )
