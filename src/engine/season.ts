@@ -323,12 +323,6 @@ export function resolveSeasonEnd(state: GameState): GameState {
             const growthScale = scaleTable?.[scaleIdx] ?? 1.0
 
             yieldProduced = Math.floor(baseYield * soilModifier * finalWeatherModifier * growthScale)
-            // Apply growth stage yield scale
-            const scaleTable = CROP_YIELD_SCALE_BY_SEASONS[tile.currentCrop]
-            const scaleIdx   = Math.min(tile.seasonsInGround, (scaleTable?.length ?? 1) - 1)
-            const growthScale = scaleTable?.[scaleIdx] ?? 1.0
-
-            yieldProduced = Math.floor(baseYield * soilModifier * finalWeatherModifier * growthScale)
 
             if (yieldProduced > 0) {
               // Food crops (corn, sweet potato, cowpeas) go to provisions, not storage.
