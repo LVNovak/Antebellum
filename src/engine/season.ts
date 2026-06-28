@@ -285,8 +285,19 @@ export function resolveSeasonEnd(state: GameState): GameState {
       tile.seasonsInGround = 0
     } else {
       if (workersHarvesting > 0) {
-        const baseYield = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
-        if (baseYield > 0) {
+        const minSeasons = CROP_MIN_SEASONS_TO_HARVEST[tile.currentCrop] ?? 1
+        const tooEarly   = tile.seasonsInGround < minSeasons
+        const baseYield  = CROP_BASE_YIELD_PER_TILE[tile.currentCrop] ?? 0
+
+        if (tooEarly) {
+          events.push({
+            id: generateId(), season, year,
+            category: 'Economic',
+            title: `${tile.currentCrop} Not Ready`,
+            description: `The ${tile.currentCrop.toLowerCase()} on this parcel hasn't had enough time to mature. Leave it another season.`,
+            effects: ['No yield this season — crop still growing'],
+          })
+        } else if (baseYield > 0) {
           const soilModifier = computeYieldModifierFromSoil(tile.soil)
           const baseWeatherModifier = WEATHER_YIELD_MODIFIER[weather]
           const tendingWorkers = tendingWorkersByTile.get(tile.id) ?? 0
@@ -295,9 +306,6 @@ export function resolveSeasonEnd(state: GameState): GameState {
             : Math.min(TEND_MAX_MITIGATION, tendingWorkers * TEND_MITIGATION_PER_WORKER)
           const weatherModifier = Math.min(1.0, baseWeatherModifier + tendingMitigation)
 
-          // Apply per-crop weather resistance — subsistence crops (corn,
-          // sweet potato, cowpeas) are more resilient than tobacco.
-          // Resistance values override the base weather modifier for that crop.
           const cropResistance = CROP_WEATHER_RESISTANCE[tile.currentCrop]
           const effectiveWeatherModifier = cropResistance?.[weather] !== undefined
             ? Math.max(weatherModifier, cropResistance[weather]!)
@@ -305,26 +313,16 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
           const isRiceDestroyedByDrought = tile.currentCrop === CropType.Rice && weather === WeatherEvent.Drought
 
-          // Workers assigned to harvest protect the tile from early frost —
-          // they collect before the frost hits. Override the 0.00 frost modifier.
           const workerFrostProtection = frostDestroyed && workersHarvesting > 0
           const finalWeatherModifier = workerFrostProtection ? 1.0 : effectiveWeatherModifier
 
-          // Growth gate: crop must have been in the ground long enough to harvest.
-          // seasonsInGround was already incremented this season by Step 3.
-          const minSeasons = CROP_MIN_SEASONS_TO_HARVEST[tile.currentCrop] ?? 1
-          const tooEarly = tile.seasonsInGround < minSeasons
+          if (!isRiceDestroyedByDrought) {
+            // Apply growth stage yield scale
+            const scaleTable  = CROP_YIELD_SCALE_BY_SEASONS[tile.currentCrop]
+            const scaleIdx    = Math.min(tile.seasonsInGround, (scaleTable?.length ?? 1) - 1)
+            const growthScale = scaleTable?.[scaleIdx] ?? 1.0
 
-          if (tooEarly) {
-            // Crop not ready — harvesters find nothing worth taking
-            events.push({
-              id: generateId(), season, year,
-              category: 'Economic',
-              title: `${tile.currentCrop} Not Ready`,
-              description: `The ${tile.currentCrop.toLowerCase()} on this parcel hasn't had enough time to mature. Leave it another season.`,
-              effects: ['No yield this season — crop still growing'],
-            })
-          } else if (!isRiceDestroyedByDrought) {
+            yieldProduced = Math.floor(baseYield * soilModifier * finalWeatherModifier * growthScale)
             // Apply growth stage yield scale
             const scaleTable = CROP_YIELD_SCALE_BY_SEASONS[tile.currentCrop]
             const scaleIdx   = Math.min(tile.seasonsInGround, (scaleTable?.length ?? 1) - 1)
@@ -370,7 +368,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
             }
           }
         }
-        // Harvested tile becomes empty — only if crop was actually harvestable
+        // Only clear crop if harvest was valid (not too early)
         if (!tooEarly) {
           tile.currentCrop = null
           tile.seasonsInGround = 0

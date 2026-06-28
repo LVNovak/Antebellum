@@ -24,6 +24,7 @@ function makeTile(soil: SoilHealth, crop: CropType | null = null, hasStumpRot = 
     isWaterAdjacent: false,
     soil,
     currentCrop: crop,
+    seasonsInGround: 0,
     hasStumpRot,
     stumpRotSeasonsLeft: hasStumpRot ? 1 : 0,
     clearingProgressRemaining: 0,
