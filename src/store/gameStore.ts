@@ -331,22 +331,23 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
   // ── Build smokehouse ──────────────────────────────────────────────────────
   buildSmokehouse: () => {
+    // Smokehouse is now a starting item. This action upgrades to a full storehouse.
     const { gameState } = get()
     if (!gameState) return
-    if (gameState.storage.capacity >= STORAGE_CAPACITY_SMOKEHOUSE) return // already built
+    if (gameState.storage.capacity >= STORAGE_CAPACITY_STOREHOUSE) return // already upgraded
     if (gameState.finances.cashOnHand < SMOKEHOUSE_BUILD_COST_MIN) return
 
     const newCash = gameState.finances.cashOnHand - SMOKEHOUSE_BUILD_COST_MIN
 
     const updated: GameState = {
       ...gameState,
-      storage: { ...gameState.storage, capacity: STORAGE_CAPACITY_SMOKEHOUSE },
+      storage: { ...gameState.storage, capacity: STORAGE_CAPACITY_STOREHOUSE },
       finances: {
         ...gameState.finances,
         cashOnHand: newCash,
       },
       transactionLog: [...gameState.transactionLog, recordTransaction({
-        description:   'Built smokehouse (50-unit storage)',
+        description:   'Built storehouse (expanded storage capacity)',
         amount:        -SMOKEHOUSE_BUILD_COST_MIN,
         newCashOnHand: newCash,
         season:        gameState.currentSeason,
@@ -912,7 +913,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
   const { cashOnHand, factorAdvance, personalNote } = getStartingFinances(startingCapital, clearedStartingTiles)
 
   return {
-    version:         '0.5.0',
+    version:         typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.5.0',
     createdAt:       now,
     lastSavedAt:     now,
     playerName,
@@ -931,7 +932,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     coverCropSeedStockOwned: false,
     conditionsIndex: 75,
     storage: {
-      capacity:             STORAGE_CAPACITY_NONE,
+      capacity:             STORAGE_CAPACITY_SMOKEHOUSE,  // basic smokehouse present from game start
       inventory:            {},
       seasonsStored:        {},
       hasCooperAssigned:    false,

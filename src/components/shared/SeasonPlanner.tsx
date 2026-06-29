@@ -23,6 +23,7 @@ import { CropType, Tile, TerrainType, LaborType } from '@engine/types'
 import { getTileDisplayLabel } from '@engine/tileUtils'
 import {
   STORAGE_CAPACITY_SMOKEHOUSE,
+  STORAGE_CAPACITY_STOREHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
   LAND_PARCEL_COST,
   WATER_ADJACENT_PRICE_PREMIUM,
@@ -130,8 +131,8 @@ export default function SeasonPlanner() {
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
   const overAllocated    = remaining < 0
-  const smokehouseBuilt  = storage.capacity >= STORAGE_CAPACITY_SMOKEHOUSE
-  const canAffordSmokehouse = finances.cashOnHand >= SMOKEHOUSE_BUILD_COST_MIN
+  const storehouseBuilt  = storage.capacity >= STORAGE_CAPACITY_STOREHOUSE
+  const canAffordStorehouse = finances.cashOnHand >= SMOKEHOUSE_BUILD_COST_MIN
   const cornCost         = cornToBuy * 2
   const blanketCost      = blanketsToBuy * 3
   const supplyCost       = cornCost + blanketCost
@@ -400,7 +401,7 @@ export default function SeasonPlanner() {
               />
             </div>
 
-            {smokehouseBuilt && (
+            {storehouseBuilt && (
               <div className="px-4 py-3 border-b border-earth-800 flex items-center justify-between">
                 <div>
                   <span className="text-earth-200 text-sm">Storage Management</span>
@@ -576,16 +577,16 @@ export default function SeasonPlanner() {
                   {finances.cashOnHand >= CABIN_BUILD_COST_MIN ? 'Build' : `Need $${CABIN_BUILD_COST_MIN}`}
                 </button>
               </div>
-              {!smokehouseBuilt && (
+              {!storehouseBuilt && (
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-earth-200 text-sm font-bold">Smokehouse</span>
+                    <span className="text-earth-200 text-sm font-bold">Storehouse</span>
                     <p className="text-earth-500 text-xs">Unlocks 50-unit crop storage. Required to sell crops.</p>
                     <p className="text-earth-400 text-xs">${SMOKEHOUSE_BUILD_COST_MIN}</p>
                   </div>
-                  <button onClick={buildSmokehouse} disabled={!canAffordSmokehouse}
+                  <button onClick={buildSmokehouse} disabled={!canAffordStorehouse}
                     className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40">
-                    {canAffordSmokehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
+                    {canAffordStorehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
                   </button>
                 </div>
               )}

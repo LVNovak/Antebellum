@@ -1,16 +1,21 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
+import { readFileSync } from 'fs'
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
 
-  // This tells GitHub Pages where the app lives.
-  // If your repo is at github.com/LVNovak/Antebellum, the base is /Antebellum/
+  // Inject package.json version so debug logs are traceable
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+
   base: '/Antebellum/',
 
-  // Mirror the path aliases from tsconfig so Vite resolves them too
   resolve: {
     alias: {
       '@engine': resolve(__dirname, 'src/engine'),
@@ -21,7 +26,6 @@ export default defineConfig({
     }
   },
 
-  // Test configuration lives here so we only need one config file
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],

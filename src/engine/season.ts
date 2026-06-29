@@ -618,13 +618,27 @@ export function resolveSeasonEnd(state: GameState): GameState {
     // Storm damage — immediate one-tier degradation
     if (weather === WeatherEvent.Storm && cabin.condition !== CabinCondition.Damaged) {
       const newCondition = degradeCabinCondition(cabin.condition)
-      events.push({
-        id: generateId(), season, year,
-        category: 'Economic',
-        title: 'Cabin Storm Damage',
-        description: `Storm damaged a cabin — condition dropped from ${cabin.condition} to ${newCondition}.`,
-        effects: [`Cabin condition: ${newCondition}`],
-      })
+      // Dropping to Damaged triggers an emergency repair cost — basic shoring
+      // up to keep the structure standing. Without cash this becomes debt.
+      if (newCondition === CabinCondition.Damaged) {
+        const emergencyCost = 30
+        next.finances.cashOnHand -= emergencyCost
+        events.push({
+          id: generateId(), season, year,
+          category: 'Economic',
+          title: 'Cabin Storm Damage',
+          description: `Storm seriously damaged a cabin — condition dropped from ${cabin.condition} to Damaged. Emergency shoring cost $${emergencyCost}.`,
+          effects: [`Cabin condition: Damaged`, `-$${emergencyCost} emergency repair`],
+        })
+      } else {
+        events.push({
+          id: generateId(), season, year,
+          category: 'Economic',
+          title: 'Cabin Storm Damage',
+          description: `Storm damaged a cabin — condition dropped from ${cabin.condition} to ${newCondition}.`,
+          effects: [`Cabin condition: ${newCondition}`],
+        })
+      }
       return { ...cabin, condition: newCondition, receivedMaintenanceThisSeason: false }
     }
 
