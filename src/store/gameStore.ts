@@ -28,8 +28,8 @@ import {
 import { resolveSeasonEnd } from '@engine/season'
 import { recordTransaction } from '@engine/transactions'
 import {
-  STORAGE_CAPACITY_NONE,
   STORAGE_CAPACITY_SMOKEHOUSE,
+  STORAGE_CAPACITY_STOREHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
   CABIN_BUILD_COST_MIN,
   LAND_PARCEL_COST,

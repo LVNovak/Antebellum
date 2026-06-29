@@ -22,7 +22,6 @@ import { useGameStore, SeasonPlan, TileAction, countAllocatedWorkers } from '@st
 import { CropType, Tile, TerrainType, LaborType } from '@engine/types'
 import { getTileDisplayLabel } from '@engine/tileUtils'
 import {
-  STORAGE_CAPACITY_SMOKEHOUSE,
   STORAGE_CAPACITY_STOREHOUSE,
   SMOKEHOUSE_BUILD_COST_MIN,
   LAND_PARCEL_COST,
