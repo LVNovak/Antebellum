@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
-import { Worker, LaborType, HealthLevel, FamilyMemberRole } from '@engine/types'
+import { Worker, LaborType, HealthLevel } from '@engine/types'
 import { getHealthLabel, getHealthColorClass } from '@engine/labor'
 
 const LABOR_TYPE_LABELS: Record<LaborType, string> = {

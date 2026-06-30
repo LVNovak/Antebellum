@@ -61,7 +61,7 @@ export interface SeasonPlan {
   storageWorkers: number
   compostWorkers: number
   // Family member task assignments — keyed by family member id
-  familyAssignments: Record<string, WorkerTask>
+  familyAssignments: Record<string, WorkerTask | null>
 }
 
 export type TileAction =

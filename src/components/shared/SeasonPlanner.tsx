@@ -126,6 +126,7 @@ export default function SeasonPlanner() {
     currentSeason, currentYear,
     clearedMaterialOnHand, seedInventory,
     compostFacilityBuilt, coverCropSeedStockOwned,
+    family,
   } = gameState
   const totalWorkers     = workers.length
   const allocated        = countAllocatedWorkers(seasonPlan)
