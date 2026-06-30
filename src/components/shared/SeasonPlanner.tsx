@@ -88,6 +88,7 @@ export default function SeasonPlanner() {
   const setCabinRepair       = useGameStore(s => s.setCabinRepairWorkers)
   const setStorageWorkers    = useGameStore(s => s.setStorageWorkers)
   const setCompostWorkers    = useGameStore(s => s.setCompostWorkers)
+  const setFamilyTask        = useGameStore(s => s.setFamilyTask)
   const confirmPlanAndAdvance = useGameStore(s => s.confirmPlanAndAdvance)
   const closeSeasonPlanner   = useGameStore(s => s.closeSeasonPlanner)
   const buySupplies          = useGameStore(s => s.buySupplies)
@@ -383,6 +384,50 @@ export default function SeasonPlanner() {
             <div className="px-4 py-2 bg-earth-800/30 text-earth-500 text-xs">
               {clearedMaterialOnHand} unit(s) of cleared material in storage — apply to a field above to boost its soil.
             </div>
+          )}
+
+          {/* ── FAMILY LABOR ── */}
+          {(family ?? []).filter(m => m.laborUnits > 0).length > 0 && (
+            <Section title="Household Labor">
+              {(family ?? []).filter(m => m.laborUnits > 0).map(member => {
+                const currentTask = seasonPlan.familyAssignments[member.id] ?? null
+                const FAMILY_TASKS = [
+                  { label: 'Rest', value: null },
+                  { label: 'Clear Land', value: { type: 'ClearLand' as const } },
+                  { label: 'Plant Crop', value: { type: 'PlantCrop' as const, tileId: '', crop: null } },
+                  { label: 'Tend Crop', value: { type: 'TendCrop' as const, tileId: '' } },
+                  { label: 'Harvest Crop', value: { type: 'HarvestCrop' as const, tileId: '' } },
+                  { label: 'Repair Cabin', value: { type: 'RepairCabin' as const } },
+                  { label: 'Manage Storage', value: { type: 'ManageStorage' as const } },
+                  { label: 'Tend Compost', value: { type: 'TendCompost' as const } },
+                ]
+                return (
+                  <div key={member.id} className="px-4 py-3 border-b border-earth-800 last:border-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="text-earth-200 text-sm font-bold">{member.name}</span>
+                        <span className="text-earth-500 text-xs ml-2">{member.role} — free labor</span>
+                      </div>
+                      <span className="text-soil-good text-xs">No wage cost</span>
+                    </div>
+                    <select
+                      value={currentTask ? JSON.stringify(currentTask) : 'null'}
+                      onChange={e => {
+                        const val = e.target.value === 'null' ? null : JSON.parse(e.target.value)
+                        setFamilyTask(member.id, val)
+                      }}
+                      className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
+                    >
+                      {FAMILY_TASKS.map(t => (
+                        <option key={t.label} value={t.value === null ? 'null' : JSON.stringify(t.value)}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </Section>
           )}
 
           {/* ── MAINTENANCE ── */}

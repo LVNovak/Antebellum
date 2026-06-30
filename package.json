@@ -1,6 +1,6 @@
 {
   "name": "antebellum",
-  "version": "2.11.3",
+  "version": "2.12.0",
   "description": "A colonial Carolina plantation economy simulator",
   "private": true,
   "scripts": {

@@ -198,6 +198,33 @@ export interface Tile {
  * All five labor types use this same structure.
  * Every worker is a named individual — not a unit or a number.
  */
+export enum FamilyMemberRole {
+  Owner   = 'Owner',
+  Spouse  = 'Spouse',
+  Child   = 'Child',
+}
+
+/**
+ * A household member. Owner is always present; spouse and children
+ * are added via in-game events. Family members contribute labor at
+ * no wage cost but draw provisions from the same stores as the workforce.
+ */
+export interface FamilyMember {
+  id:       string
+  name:     string
+  role:     FamilyMemberRole
+  age:      number | null   // null for owner (ageless in the sim); tracked for children
+  // Labor capacity: 0 = none, 0.5 = partial (young child), 1 = full
+  laborUnits: number
+  // Task this member is assigned to this season (same task union as workers)
+  assignedTask: WorkerTask | null
+}
+
+/**
+ * A single named worker on the plantation.
+ * All five labor types use this same structure.
+ * Every worker is a named individual — not a unit or a number.
+ */
 export interface Worker {
   id:         string
   name:       string        // period-appropriate name for their background
@@ -446,6 +473,9 @@ export interface GameState {
   workers:      Worker[]
   cabins:       Cabin[]
 
+  // Household — owner always present; spouse and children added via events
+  family:       FamilyMember[]
+
   // Storage and market
   storage:      Storage
   market:       MarketPrices
@@ -463,6 +493,7 @@ export interface GameState {
   seedInventory: Partial<Record<CropType, number>>
 
   // Infrastructure flags
+  ownerHouseLevel:         number   // 0 = rough starting structure; upgradeable later
   compostFacilityBuilt:    boolean  // required before cleared material can be applied
   coverCropSeedStockOwned: boolean  // required before Cover Crop is plantable
 

@@ -20,10 +20,13 @@ import {
   CropType,
   LaborType,
   WorkerSkill,
+  WorkerTask,
   HealthLevel,
   CabinCondition,
   TerrainType,
   Transaction,
+  FamilyMember,
+  FamilyMemberRole,
 } from '@engine/types'
 import { resolveSeasonEnd } from '@engine/season'
 import { recordTransaction } from '@engine/transactions'
@@ -56,7 +59,9 @@ export interface SeasonPlan {
   tileAllocations: Record<string, TileAction>
   cabinRepairWorkers: number
   storageWorkers: number
-  compostWorkers: number   // separate from storage — tends compost facility
+  compostWorkers: number
+  // Family member task assignments — keyed by family member id
+  familyAssignments: Record<string, WorkerTask>
 }
 
 export type TileAction =
@@ -96,6 +101,7 @@ interface GameStore {
   setCabinRepairWorkers:  (count: number) => void
   setStorageWorkers:      (count: number) => void
   setCompostWorkers:      (count: number) => void
+  setFamilyTask:          (memberId: string, task: WorkerTask | null) => void
   confirmPlanAndAdvance:  () => void
 
   // Supply and build actions
@@ -138,7 +144,7 @@ interface NewGameParams {
 // ---------------------------------------------------------------------------
 
 function emptySeasonPlan(): SeasonPlan {
-  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0, compostWorkers: 0 }
+  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0, compostWorkers: 0, familyAssignments: {} }
 }
 
 export function countAllocatedWorkers(plan: SeasonPlan): number {
@@ -201,6 +207,13 @@ function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['work
  * Applies crop planting from the plan to tiles.
  * Tiles with a Plant action get their currentCrop set.
  */
+function applyFamilyPlan(state: GameState, plan: SeasonPlan): GameState['family'] {
+  return (state.family ?? []).map(member => {
+    const task = plan.familyAssignments[member.id] ?? null
+    return { ...member, assignedTask: task as FamilyMember['assignedTask'] }
+  })
+}
+
 function applyPlanToTiles(state: GameState, plan: SeasonPlan): GameState['tiles'] {
   return state.tiles.map(tile => {
     const action = plan.tileAllocations[tile.id]
@@ -260,16 +273,27 @@ export const useGameStore = create<GameStore>((set, get) => ({
     seasonPlan: { ...s.seasonPlan, compostWorkers: count }
   })),
 
+  setFamilyTask: (memberId, task) => set(s => ({
+    seasonPlan: {
+      ...s.seasonPlan,
+      familyAssignments: {
+        ...s.seasonPlan.familyAssignments,
+        [memberId]: task,
+      }
+    }
+  })),
+
   // ── Confirm plan and advance season ──────────────────────────────────────
   confirmPlanAndAdvance: () => {
     const { gameState, seasonPlan } = get()
     if (!gameState) return
 
-    // Apply plan to workers and tiles before resolving the season
+    // Apply plan to workers, tiles, and family before resolving the season
     const withAssignments: GameState = {
       ...gameState,
       workers: applyPlanToWorkers(gameState, seasonPlan),
       tiles:   applyPlanToTiles(gameState, seasonPlan),
+      family:  applyFamilyPlan(gameState, seasonPlan),
     }
 
     const eventCountBefore = withAssignments.eventLog.length
@@ -924,10 +948,12 @@ function buildInitialGameState(params: NewGameParams): GameState {
     tiles:           [grantTile],
     workers:         [worker1, worker2],
     cabins:          [cabin1, cabin2],
+    family:          [buildOwner(playerName)],
     blanketsOnHand:  4,
     cornOnHand:      8,
     clearedMaterialOnHand: 0,
-    seedInventory:   {},  // no seeds at start — player must buy before first planting
+    seedInventory:   {},
+    ownerHouseLevel:         0,
     compostFacilityBuilt:    false,
     coverCropSeedStockOwned: false,
     conditionsIndex: 75,
@@ -1048,6 +1074,17 @@ function buildGrantTile(origin: Origin) {
     stumpRotSeasonsLeft:       0,
     clearingProgressRemaining: config.isCleared ? 0 : LAND_CLEARING_COST[config.terrain],
     history: [],
+  }
+}
+
+function buildOwner(name: string): FamilyMember {
+  return {
+    id:           'owner',
+    name,
+    role:         FamilyMemberRole.Owner,
+    age:          null,
+    laborUnits:   1,
+    assignedTask: null,
   }
 }
 

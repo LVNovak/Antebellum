@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { useGameStore } from '@store/gameStore'
-import { Worker, LaborType, HealthLevel } from '@engine/types'
+import { Worker, LaborType, HealthLevel, FamilyMemberRole } from '@engine/types'
 import { getHealthLabel, getHealthColorClass } from '@engine/labor'
 
 const LABOR_TYPE_LABELS: Record<LaborType, string> = {
@@ -27,7 +27,7 @@ export default function LaborRoster() {
 
   if (!gameState) return null
 
-  const { workers, conditionsIndex } = gameState
+  const { workers, conditionsIndex, family } = gameState
 
   // Group workers by labor type
   const grouped = workers.reduce((acc, worker) => {
@@ -41,7 +41,35 @@ export default function LaborRoster() {
     <div className="p-4 flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h2 className="font-serif text-earth-100 text-xl">Labor Roster</h2>
-        <span className="text-earth-400 text-sm">{workers.length} total</span>
+        <span className="text-earth-400 text-sm">{workers.length} workers</span>
+      </div>
+
+      {/* Family section — always shown first */}
+      <div className="bg-earth-800 border border-earth-700 rounded overflow-hidden">
+        <div className="px-4 py-2 bg-earth-750 border-b border-earth-700">
+          <span className="text-earth-300 text-xs font-bold uppercase tracking-wide">Household</span>
+        </div>
+        {(family ?? []).map(member => (
+          <div key={member.id} className="px-4 py-3 flex justify-between items-center border-b border-earth-700 last:border-0">
+            <div>
+              <span className="text-earth-100 text-sm font-bold">{member.name}</span>
+              <span className="text-earth-500 text-xs ml-2">{member.role}</span>
+              {member.age !== null && (
+                <span className="text-earth-600 text-xs ml-1">age {member.age}</span>
+              )}
+            </div>
+            <div className="text-right">
+              <div className="text-earth-400 text-xs">
+                {member.laborUnits === 0 ? 'No labor yet'
+                  : member.laborUnits < 1 ? `${Math.round(member.laborUnits * 100)}% capacity`
+                  : 'Full labor unit'}
+              </div>
+              {member.assignedTask && (
+                <div className="text-earth-300 text-xs mt-0.5">{member.assignedTask.type ?? member.assignedTask}</div>
+              )}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Conditions Index */}

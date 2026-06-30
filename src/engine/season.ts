@@ -572,6 +572,33 @@ export function resolveSeasonEnd(state: GameState): GameState {
     })
   }
 
+  // Family upkeep — owner and household members draw from the same pools
+  const familyMembers = next.family ?? []
+  const activeFamilyMembers = familyMembers.filter(m => m.laborUnits > 0 || m.role === 'Owner')
+  if (activeFamilyMembers.length > 0) {
+    // Food — same rate as provisioned workers
+    const familyCornNeeded = activeFamilyMembers.length * LABOR_UPKEEP.corn
+    const familyCornConsumed = Math.min(next.cornOnHand, familyCornNeeded)
+    next.cornOnHand -= familyCornConsumed
+
+    // Blankets
+    const familyBlanketsNeeded = activeFamilyMembers.length * LABOR_UPKEEP.blankets
+    const familyBlanketsConsumed = Math.min(next.blanketsOnHand, familyBlanketsNeeded)
+    next.blanketsOnHand -= familyBlanketsConsumed
+
+    // Clothing — cash cost per family member
+    const familyClothingCost = activeFamilyMembers.length * LABOR_UPKEEP.clothing
+    next.finances.cashOnHand -= familyClothingCost
+    if (familyClothingCost > 0) {
+      next.transactionLog.push(recordTransaction({
+        description:   `Household provisions (${activeFamilyMembers.length} family member${activeFamilyMembers.length !== 1 ? 's' : ''})`,
+        amount:        -familyClothingCost,
+        newCashOnHand: next.finances.cashOnHand,
+        season, year,
+      }))
+    }
+  }
+
   // Rental and wage fees — hired-out enslaved and free wage workers
   let totalRentalCost = 0
   for (const worker of rentalWorkers) {
