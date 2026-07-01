@@ -1010,20 +1010,6 @@ function countCombinedByTask(
   return counts
 }
 
-function countWorkersByTask(
-  workers: GameState['workers'],
-  taskType: 'ClearLand' | 'HarvestCrop' | 'TendCrop'
-): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const worker of workers) {
-    const task = worker.assignedTask
-    if (!task || task.type !== taskType) continue
-    if (!('tileId' in task)) continue
-    counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + 1)
-  }
-  return counts
-}
-
 function estimateAssetValue(state: GameState): number {
   const storedCropValue = Object.entries(state.storage.inventory)
     .reduce((sum, [crop, qty]) => {
