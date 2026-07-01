@@ -151,19 +151,18 @@ const ACHIEVEMENT_CHECKERS: AchievementChecker[] = [
   {
     id:   'abolitionist-path',
     name: 'The Abolitionist Path',
-    conditionText: `Operated exclusively on free and indentured labor for ${ACHIEVEMENT_THRESHOLDS.abolitionistYears} consecutive years while remaining solvent.`,
+    conditionText: `Operated exclusively on free and indentured labor for ${ACHIEVEMENT_THRESHOLDS.abolitionistYears} consecutive years while remaining solvent, generating at least $${ACHIEVEMENT_THRESHOLDS.abolitionistMinRevenue} in annual sales.`,
     check: (state) => {
-      // No enslaved workers of any kind
-      const hasEnslavedWorkers = state.workers.some(
-        w => w.laborType === LaborType.EnslavedPurchased ||
-             w.laborType === LaborType.EnslavedHiredOut
-      )
-
+      const usedEnslavedThisYear = state.enslavedUsedThisYear ?? false
       const isSolvent = state.finances.cashOnHand >= 0
+      // Revenue gate — rules out solo owner operations that aren't genuinely
+      // running a free-labour enterprise. Owner alone can't hit this threshold.
+      const meetsRevenue = (state.yearlyRevenue ?? 0) >= ACHIEVEMENT_THRESHOLDS.abolitionistMinRevenue
 
       return (
-        !hasEnslavedWorkers &&
+        !usedEnslavedThisYear &&
         isSolvent &&
+        meetsRevenue &&
         state.currentYear >= ACHIEVEMENT_THRESHOLDS.abolitionistYears
       )
     },

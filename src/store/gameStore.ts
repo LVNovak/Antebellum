@@ -305,7 +305,14 @@ export const useGameStore = create<GameStore>((set, get) => ({
       showingSeasonPlanner: false,
       showingSeasonSummary: true,
       lastSeasonEvents:     newEvents,
-      seasonPlan:           emptySeasonPlan(), // reset plan for next season
+      seasonPlan: {
+        ...emptySeasonPlan(),
+        // Carry forward family task assignments so the owner doesn't reset
+        // to Rest every season — player only needs to change if they want to
+        familyAssignments: Object.fromEntries(
+          (nextState.family ?? []).map(m => [m.id, m.assignedTask])
+        ),
+      },
     })
     saveToLocalStorage(nextState)
   },
@@ -957,6 +964,8 @@ function buildInitialGameState(params: NewGameParams): GameState {
     compostFacilityBuilt:    false,
     coverCropSeedStockOwned: false,
     conditionsIndex: 75,
+    enslavedUsedThisYear: false,
+    yearlyRevenue: 0,
     storage: {
       capacity:             STORAGE_CAPACITY_SMOKEHOUSE,  // basic smokehouse present from game start
       inventory:            {},

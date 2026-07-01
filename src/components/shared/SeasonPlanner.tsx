@@ -132,6 +132,8 @@ export default function SeasonPlanner() {
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
   const overAllocated    = remaining < 0
+  // Family labor is tracked separately — doesn't consume worker slots
+  const activeFamilyUnits = (family ?? []).filter(m => m.laborUnits > 0 && seasonPlan.familyAssignments[m.id] && seasonPlan.familyAssignments[m.id] !== null).length
   const storehouseBuilt  = storage.capacity >= STORAGE_CAPACITY_STOREHOUSE
   const canAffordStorehouse = finances.cashOnHand >= SMOKEHOUSE_BUILD_COST_MIN
   const cornCost         = cornToBuy * 2
@@ -267,6 +269,7 @@ export default function SeasonPlanner() {
           <div className="text-right">
             <div className={`font-mono font-bold text-sm ${overAllocated ? 'text-soil-poor' : 'text-soil-good'}`}>
               {allocated} / {totalWorkers} workers
+              {activeFamilyUnits > 0 && <span className="text-earth-400 font-normal"> +{activeFamilyUnits} household</span>}
             </div>
             <div className="text-earth-500 text-xs">
               {remaining > 0 ? `${remaining} resting` : overAllocated ? 'Over-allocated!' : 'All assigned'}
@@ -446,7 +449,7 @@ export default function SeasonPlanner() {
               />
             </div>
 
-            {storehouseBuilt && (
+            {storage.capacity > 0 && (
               <div className="px-4 py-3 border-b border-earth-800 flex items-center justify-between">
                 <div>
                   <span className="text-earth-200 text-sm">Storage Management</span>

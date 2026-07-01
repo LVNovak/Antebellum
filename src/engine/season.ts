@@ -91,7 +91,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
   // ── Step 2: Land clearing progress ────────────────────────────────────────
   // Tiles with workers assigned to ClearLand make progress toward being cleared.
   // Each assigned worker contributes 1 labor-season toward clearingProgressRemaining.
-  const clearingWorkersByTile = countWorkersByTask(next.workers, 'ClearLand')
+  const clearingWorkersByTile = countCombinedByTask(next.workers, next.family ?? [], 'ClearLand')
 
   next.tiles = next.tiles.map(tile => {
     if (tile.isCleared) return tile
@@ -146,7 +146,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
   )
 
   // ── Step 3: Update soil on all cleared tiles ──────────────────────────────
-  const tendingWorkersByTile = countWorkersByTask(next.workers, 'TendCrop')
+  const tendingWorkersByTile = countCombinedByTask(next.workers, next.family ?? [], 'TendCrop')
 
   // Tending generates compost material from weeding/pruning across all tiles
   for (const [, workerCount] of tendingWorkersByTile) {
@@ -202,7 +202,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // ── Step 4: Compute harvests ──────────────────────────────────────────────
   let harvestedCorn = 0
-  const harvestingWorkersByTile = countWorkersByTask(next.workers, 'HarvestCrop')
+  const harvestingWorkersByTile = countCombinedByTask(next.workers, next.family ?? [], 'HarvestCrop')
   const frostDestroyed = season === Season.Autumn && weather === WeatherEvent.EarlyFrost
 
   const debugTileData: DebugEntry['tiles'] = []
@@ -856,6 +856,23 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // ── Step 12: Advance time ─────────────────────────────────────────────────
   const { nextSeason, nextYear } = advanceSeason(season, year)
+
+  // Update enslaved-this-year tracking for Abolitionist Path trophy.
+  // If any enslaved worker (purchased or hired-out) was in the roster this
+  // season, mark the flag. Reset at the start of a new year (Winter → Spring).
+  const hadEnslavedThisSeason = state.workers.some(
+    w => w.laborType === LaborType.EnslavedPurchased ||
+         w.laborType === LaborType.EnslavedHiredOut
+  )
+  if (nextYear > year) {
+    // New year starting — reset both tracking flags
+    next.enslavedUsedThisYear = false
+    next.yearlyRevenue = 0
+  } else {
+    next.enslavedUsedThisYear = (next.enslavedUsedThisYear ?? false) || hadEnslavedThisSeason
+    next.yearlyRevenue = (next.yearlyRevenue ?? 0) + saleResult.revenue
+  }
+
   next.currentSeason = nextSeason
   next.currentYear   = nextYear
   next.lastSavedAt   = new Date().toISOString()
@@ -878,6 +895,10 @@ export function resolveSeasonEnd(state: GameState): GameState {
     workers: next.workers.map(w => ({
       id: w.id, name: w.name, type: w.laborType, health: w.health,
       task: w.assignedTask?.type ?? 'Unassigned',
+    })),
+    family: (next.family ?? []).map(m => ({
+      id: m.id, name: m.name, role: m.role,
+      task: m.assignedTask?.type ?? 'Rest',
     })),
     finances: {
       cashStart:      state.finances.cashOnHand,
@@ -963,6 +984,32 @@ function getTotalStoredUnits(storage: { inventory: Partial<Record<CropType, numb
  *
  * Only considers tasks that include a tileId (ClearLand, HarvestCrop, etc.)
  */
+/**
+ * Builds a combined task map that includes both workers and family members.
+ * Family members contribute laborUnits per tile (fractional units rounded down to 1 for simplicity).
+ */
+function countCombinedByTask(
+  workers: GameState['workers'],
+  family: GameState['family'],
+  taskType: 'ClearLand' | 'HarvestCrop' | 'TendCrop'
+): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const worker of workers) {
+    const task = worker.assignedTask
+    if (!task || task.type !== taskType) continue
+    if (!('tileId' in task)) continue
+    counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + 1)
+  }
+  for (const member of (family ?? [])) {
+    if (member.laborUnits <= 0) continue
+    const task = member.assignedTask
+    if (!task || task.type !== taskType) continue
+    if (!('tileId' in task)) continue
+    counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + Math.max(1, Math.floor(member.laborUnits)))
+  }
+  return counts
+}
+
 function countWorkersByTask(
   workers: GameState['workers'],
   taskType: 'ClearLand' | 'HarvestCrop' | 'TendCrop'

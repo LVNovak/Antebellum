@@ -499,6 +499,15 @@ export interface GameState {
 
   conditionsIndex: number
 
+  // Trophy tracking — set true any season an enslaved worker (purchased or
+  // hired-out) appears in the active roster. Resets at the start of each year.
+  // Used by the Abolitionist Path trophy to detect actual year-round avoidance
+  // rather than just an empty Winter roster.
+  enslavedUsedThisYear: boolean
+  // Running sales revenue total for the current year — resets each New Year.
+  // Used to gate the Abolitionist Path trophy against solo-owner loophole.
+  yearlyRevenue: number
+
   // History
   eventLog:     GameEvent[]
   trophies:     Trophy[]
@@ -550,6 +559,13 @@ export interface DebugEntry {
     type:   string
     health: string
     task:   string
+  }>
+
+  family: Array<{
+    id:   string
+    name: string
+    role: string
+    task: string
   }>
 
   finances: {

@@ -734,6 +734,9 @@ export const ACHIEVEMENT_THRESHOLDS = {
 
   // The Abolitionist Path: operate on free/indentured only for this many years
   abolitionistYears: 5,
+  // Minimum annual revenue to qualify for Abolitionist Path — filters out
+  // solo owner operations that aren't genuinely running a free-labour enterprise
+  abolitionistMinRevenue: 200,
 
   // The Rotation: all parcels above this composite soil health for this many years
   rotationSoilThreshold: 60,
