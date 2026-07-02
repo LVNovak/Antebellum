@@ -62,7 +62,6 @@ import {
   COOK_PROVISION_REDUCTION,
   BLACKSMITH_TOOL_REDUCTION,
   TOOL_UPKEEP_PER_WORKER,
-  COOPER_SPOILAGE_REDUCTION,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
