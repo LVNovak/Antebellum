@@ -29,6 +29,7 @@ import {
   LABOR_ACQUISITION_COST,
   LABOR_SEASONAL_COST,
   CABIN_BUILD_COST_MIN,
+  TIMBER_PER_CABIN_BUILD,
   LABOR_UNITS_PER_WORKER_PER_SEASON,
   LAND_CLEARING_COST,
   CROP_LABOR_TO_PLANT,
@@ -88,6 +89,7 @@ export default function SeasonPlanner() {
   const setCabinRepair       = useGameStore(s => s.setCabinRepairWorkers)
   const setStorageWorkers    = useGameStore(s => s.setStorageWorkers)
   const setCompostWorkers    = useGameStore(s => s.setCompostWorkers)
+  const sellTimber           = useGameStore(s => s.sellTimber)
   const setFamilyTask        = useGameStore(s => s.setFamilyTask)
   const confirmPlanAndAdvance = useGameStore(s => s.confirmPlanAndAdvance)
   const closeSeasonPlanner   = useGameStore(s => s.closeSeasonPlanner)
@@ -126,7 +128,7 @@ export default function SeasonPlanner() {
     currentSeason, currentYear,
     clearedMaterialOnHand, seedInventory,
     compostFacilityBuilt, coverCropSeedStockOwned,
-    family,
+    family, timberOnHand,
   } = gameState
   const totalWorkers     = workers.length
   const allocated        = countAllocatedWorkers(seasonPlan)
@@ -603,7 +605,27 @@ export default function SeasonPlanner() {
             </div>
           </Section>
 
-          {/* ── BUILD & SEEDS ── */}
+          {/* ── TIMBER ── */}
+          {(timberOnHand ?? 0) > 0 && (
+            <Section title="Timber">
+              <div className="px-4 py-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <span className="text-earth-200 text-sm font-bold">{timberOnHand ?? 0} units on hand</span>
+                    <p className="text-earth-500 text-xs">Used for cabin construction, repairs, and cooking fuel.</p>
+                    <p className="text-earth-400 text-xs">Sell surplus at $2/unit</p>
+                  </div>
+                  <button
+                    onClick={() => sellTimber(timberOnHand ?? 0)}
+                    disabled={(timberOnHand ?? 0) === 0}
+                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                  >
+                    Sell All
+                  </button>
+                </div>
+              </div>
+            </Section>
+          )}
           <Section title="Build & Seeds">
             <div className="px-4 py-3 space-y-4">
 
@@ -613,7 +635,7 @@ export default function SeasonPlanner() {
                   <span className="text-earth-200 text-sm font-bold">New Cabin</span>
                   <p className="text-earth-500 text-xs">Adds 4 worker capacity. Starts in Good condition.</p>
                   <p className="text-earth-400 text-xs">
-                    ${CABIN_BUILD_COST_MIN} — {cabins.length} cabin{cabins.length !== 1 ? 's' : ''} now
+                    ${CABIN_BUILD_COST_MIN} + {TIMBER_PER_CABIN_BUILD} timber — {cabins.length} cabin{cabins.length !== 1 ? 's' : ''} now
                     ({cabins.reduce((s, c) => s + c.capacity, 0)} capacity / {workers.length} workers)
                   </p>
                 </div>

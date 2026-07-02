@@ -31,6 +31,7 @@ import {
   WeatherEvent,
   CropType,
   LaborType,
+  WorkerSkill,
   CabinCondition,
   DebugEntry,
   TileHistoryEntry,
@@ -54,6 +55,14 @@ import {
   CROP_WEATHER_RESISTANCE,
   CROP_MIN_SEASONS_TO_HARVEST,
   CROP_YIELD_SCALE_BY_SEASONS,
+  TIMBER_YIELD_ON_CLEAR,
+  TIMBER_COOKING_FUEL_PER_SEASON,
+  TIMBER_PER_CABIN_REPAIR,
+  CARPENTER_TIMBER_REDUCTION,
+  COOK_PROVISION_REDUCTION,
+  BLACKSMITH_TOOL_REDUCTION,
+  TOOL_UPKEEP_PER_WORKER,
+  COOPER_SPOILAGE_REDUCTION,
 } from './constants'
 
 import { applySeasonalSoilUpdate, getSoilHint } from './soil'
@@ -117,12 +126,16 @@ export function resolveSeasonEnd(state: GameState): GameState {
       const materialYield = CLEARED_MATERIAL_YIELD[tile.terrain]
       next.clearedMaterialOnHand += materialYield
 
+      // Timber from clearing — separate from compost material
+      const timberYield = TIMBER_YIELD_ON_CLEAR[tile.terrain]
+      next.timberOnHand = (next.timberOnHand ?? 0) + timberYield
+
       events.push({
         id: generateId(), season, year,
         category: 'Economic',
         title: 'Land Cleared',
         description: materialYield > 0
-          ? `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant. ${materialYield} unit(s) of cleared material were collected and can be composted onto a field.`
+          ? `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant. ${materialYield} unit(s) of cleared material were collected and can be composted onto a field.${timberYield > 0 ? ` ${timberYield} timber added to stock.` : ''}`
           : `A ${tile.terrain.toLowerCase()} parcel has been fully cleared and is ready to plant.`,
         effects: ['Tile available for planting next season'],
       })
@@ -520,6 +533,42 @@ export function resolveSeasonEnd(state: GameState): GameState {
 
   // ── Step 8: Pay upkeep ────────────────────────────────────────────────────
   // Provisions (corn, blankets) only apply to workers whose upkeep is the
+  // ── Detect skilled workers and apply their effects ───────────────────────
+  const allWorkers = next.workers
+  const hasCooper     = allWorkers.some(w => w.skill === WorkerSkill.Cooper    && w.assignedTask?.type === 'ManageStorage')
+  const hasCarpenter  = allWorkers.some(w => w.skill === WorkerSkill.Carpenter && w.assignedTask !== null)
+  const hasCook       = allWorkers.some(w => w.skill === WorkerSkill.Cook      && w.assignedTask !== null)
+  const hasBlacksmith = allWorkers.some(w => w.skill === WorkerSkill.Blacksmith && w.assignedTask !== null)
+
+  // Wire Cooper/Carpenter flags onto storage for applySpoilage
+  next.storage = {
+    ...next.storage,
+    hasCooperAssigned:    hasCooper,
+    hasCarpenterAssigned: hasCarpenter,
+  }
+
+  // Cooking fuel — flat seasonal drain for the whole plantation
+  const fuelCost = hasCarpenter
+    ? Math.ceil(TIMBER_COOKING_FUEL_PER_SEASON * (1 - CARPENTER_TIMBER_REDUCTION))
+    : TIMBER_COOKING_FUEL_PER_SEASON
+  next.timberOnHand = Math.max(0, (next.timberOnHand ?? 0) - fuelCost)
+
+  // Tool upkeep — small cash cost per worker, reduced by Blacksmith
+  const totalWorkerCount = next.workers.length + (next.family ?? []).filter(m => m.laborUnits > 0).length
+  const baseToolCost = totalWorkerCount * TOOL_UPKEEP_PER_WORKER
+  const toolCost = hasBlacksmith
+    ? Math.floor(baseToolCost * (1 - BLACKSMITH_TOOL_REDUCTION))
+    : Math.floor(baseToolCost)
+  if (toolCost > 0) {
+    next.finances.cashOnHand -= toolCost
+    next.transactionLog.push(recordTransaction({
+      description:   `Tool upkeep (${totalWorkerCount} workers${hasBlacksmith ? ', Blacksmith discount' : ''})`,
+      amount:        -toolCost,
+      newCashOnHand: next.finances.cashOnHand,
+      season, year,
+    }))
+  }
+
   // planter's direct responsibility: purchased enslaved and indentured.
   // Hired-out enslaved and free wage workers provision themselves — their
   // cost is captured in the rental/wage fee below.
@@ -552,7 +601,9 @@ export function resolveSeasonEnd(state: GameState): GameState {
   }
 
   // Corn provisions — purchased enslaved and indentured only
-  const cornNeeded  = provisionWorkers.length * LABOR_UPKEEP.corn
+  // Cook skill reduces total corn consumed
+  const cornBase    = provisionWorkers.length * LABOR_UPKEEP.corn
+  const cornNeeded  = hasCook ? Math.ceil(cornBase * (1 - COOK_PROVISION_REDUCTION)) : cornBase
   const cornConsumed = Math.min(next.cornOnHand, cornNeeded)
   next.cornOnHand  -= cornConsumed
   const cornShortfall = Math.max(0, cornNeeded - cornConsumed)
@@ -625,6 +676,19 @@ export function resolveSeasonEnd(state: GameState): GameState {
   // Decay is rare under normal conditions — these are new buildings.
   // Storms degrade immediately; neglect degrades slowly over years.
   const anyRepairWorker = next.workers.some(w => w.assignedTask?.type === 'RepairCabin')
+    || (next.family ?? []).some(m => m.assignedTask?.type === 'RepairCabin')
+
+  // Cabin repair consumes timber — Carpenter halves the cost
+  if (anyRepairWorker) {
+    const cabinsNeedingRepair = next.cabins.filter(c => c.condition !== CabinCondition.Good).length
+    if (cabinsNeedingRepair > 0) {
+      const baseCost = cabinsNeedingRepair * TIMBER_PER_CABIN_REPAIR
+      const timberCost = hasCarpenter
+        ? Math.ceil(baseCost * (1 - CARPENTER_TIMBER_REDUCTION))
+        : baseCost
+      next.timberOnHand = Math.max(0, (next.timberOnHand ?? 0) - timberCost)
+    }
+  }
 
   next.cabins = next.cabins.map(cabin => {
     if (anyRepairWorker) {
@@ -838,6 +902,35 @@ export function resolveSeasonEnd(state: GameState): GameState {
     }
   }
 
+  // Skilled trade discovery — small chance each season a Field worker
+  // shows aptitude for a skilled trade. Player sees notification.
+  const discoveryChance = 0.04  // ~once every 6 years with 4 workers
+  const fieldWorkers = next.workers.filter(w => w.skill === WorkerSkill.Field)
+  for (const worker of fieldWorkers) {
+    if (Math.random() < discoveryChance) {
+      const trades = [WorkerSkill.Cooper, WorkerSkill.Carpenter, WorkerSkill.Cook, WorkerSkill.Blacksmith]
+      const discovered = trades[Math.floor(Math.random() * trades.length)]
+      // Upgrade the worker's skill
+      next.workers = next.workers.map(w =>
+        w.id === worker.id ? { ...w, skill: discovered } : w
+      )
+      const tradeDescriptions: Record<string, string> = {
+        [WorkerSkill.Cooper]:     'cooper — assign to storage to reduce spoilage',
+        [WorkerSkill.Carpenter]:  'carpenter — reduces timber cost on builds and repairs',
+        [WorkerSkill.Cook]:       'cook — reduces corn consumed by the household',
+        [WorkerSkill.Blacksmith]: 'blacksmith — reduces seasonal tool upkeep costs',
+      }
+      events.push({
+        id: generateId(), season, year,
+        category: 'Labor',
+        title: 'Skilled Trade Discovered',
+        description: `${worker.name} has shown a natural talent as a ${tradeDescriptions[discovered] ?? discovered.toLowerCase()}. Their skill is now active.`,
+        effects: [`${worker.name} skill: ${discovered}`],
+      })
+      break  // one discovery per season maximum
+    }
+  }
+
   // ── Step 10: Generate new market prices for next season ────────────────────
   next.market = generateSeasonalPrices(next.market, next.finances.factor.relationshipScore)
 
@@ -908,6 +1001,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
       upkeepClothing: clothingUpkeep,
       upkeepRental:   totalRentalCost,
       upkeepInterest: totalInterestAccrued,
+    },
+    supplies: {
+      cornOnHand:    next.cornOnHand,
+      timberOnHand:  next.timberOnHand ?? 0,
+      blanketsOnHand: next.blanketsOnHand,
     },
     events: events.map(e => `[${e.category}] ${e.title}: ${e.description}`),
   }

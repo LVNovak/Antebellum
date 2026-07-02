@@ -166,7 +166,11 @@ function WorkerCard({ worker }: { worker: Worker; [key: string]: unknown }) {
       <div className="min-w-0">
         <div className="text-earth-100 text-sm font-bold">{worker.name}</div>
         <div className="text-earth-400 text-xs">
-          Age {worker.age} · {worker.skill}
+          Age {worker.age}
+          {worker.skill !== 'Field'
+            ? <span className="text-soil-good ml-1">· {worker.skill}</span>
+            : <span className="ml-1">· Field</span>
+          }
           {worker.contractSeasonsRemaining !== null && (
             <> · {worker.contractSeasonsRemaining} seasons on contract</>
           )}

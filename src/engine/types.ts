@@ -94,10 +94,12 @@ export enum CropType {
  * Skilled workers unlock storage bonuses and other improvements.
  */
 export enum WorkerSkill {
-  Field    = 'Field',     // general field labor — most common
-  Cooper   = 'Cooper',    // barrel-making; reduces storage spoilage
-  Carpenter = 'Carpenter', // construction; improves cabin and storage condition
-  Domestic = 'Domestic',  // household labor
+  Field      = 'Field',       // general field labor — most common
+  Cooper     = 'Cooper',      // barrel-making; reduces storage spoilage
+  Carpenter  = 'Carpenter',   // construction; reduces timber cost on builds, speeds repair
+  Cook       = 'Cook',        // provisioning; reduces household corn consumption
+  Blacksmith = 'Blacksmith',  // toolmaking; reduces seasonal cash tool upkeep
+  Domestic   = 'Domestic',    // household labor
 }
 
 /**
@@ -486,6 +488,7 @@ export interface GameState {
 
   cornOnHand: number
   clearedMaterialOnHand: number
+  timberOnHand: number   // from forest/swamp clearing; used for builds and cooking fuel
 
   // Seed inventory — simple Phase 1 model.
   // Value of 1 = "have seeds for this crop"; 0/absent = need to buy.
@@ -579,6 +582,12 @@ export interface DebugEntry {
   }
 
   events: string[]
+
+  supplies: {
+    cornOnHand:     number
+    timberOnHand:   number
+    blanketsOnHand: number
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -305,6 +305,42 @@ export const CLEARED_MATERIAL_YIELD: Record<TerrainType, number> = {
 }
 
 /**
+ * Timber yielded when clearing land — separate from compost material.
+ * Forest yields usable structural timber; upland scrub does not.
+ * A 2-3 acre forest tile produces substantial timber — these units
+ * represent processed, stackable lumber, not raw log count.
+ */
+export const TIMBER_YIELD_ON_CLEAR: Record<TerrainType, number> = {
+  [TerrainType.Upland]: 1,   // scrub and small trees — minimal usable timber
+  [TerrainType.Forest]: 10,  // 2-3 acres old-growth — substantial yield
+  [TerrainType.Swamp]:  5,   // dense but wet; less useful structural timber
+}
+
+/** Timber consumed per season across the whole plantation for cooking fires.
+ *  Colonial households burned wood constantly but had abundant standing timber.
+ *  This is a soft background drain, not a dominant cost. */
+export const TIMBER_COOKING_FUEL_PER_SEASON = 1   // whole plantation, not per cabin
+
+/** Timber consumed when building a new cabin (~400 sq ft, hewn log construction). */
+export const TIMBER_PER_CABIN_BUILD = 14
+
+/** Timber consumed when repairing a cabin. */
+export const TIMBER_PER_CABIN_REPAIR = 4
+
+/** Carpenter reduces timber consumption on builds and repairs. */
+export const CARPENTER_TIMBER_REDUCTION = 0.50   // 50% less timber with Carpenter assigned
+
+/** Cook reduces household + workforce corn provision consumption. */
+export const COOK_PROVISION_REDUCTION = 0.25     // 25% less corn consumed
+
+/** Blacksmith reduces seasonal cash tool upkeep. */
+export const BLACKSMITH_TOOL_REDUCTION = 0.30    // 30% reduction
+export const TOOL_UPKEEP_PER_WORKER    = 0.50    // $0.50/season baseline per worker
+
+/** Base price for selling surplus timber. */
+export const TIMBER_SALE_PRICE_PER_UNIT = 2      // $2/unit — low value byproduct
+
+/**
  * How many labor-units of clearing progress ONE worker contributes
  * per season.
  *

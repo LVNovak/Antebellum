@@ -47,6 +47,8 @@ import {
   COVER_CROP_SEED_STOCK_COST,
   FACTOR_ADVANCE_RATE,
   CROP_BASE_YIELD_PER_TILE,
+  TIMBER_PER_CABIN_BUILD,
+  TIMBER_SALE_PRICE_PER_UNIT,
 } from '@engine/constants'
 
 // ---------------------------------------------------------------------------
@@ -119,6 +121,7 @@ interface GameStore {
 
   // Soil management
   compostTile:            (tileId: string) => void
+  sellTimber:             (units: number) => void
 
   // Seeds and infrastructure
   buySeeds:               (crop: CropType) => void
@@ -599,6 +602,31 @@ export const useGameStore = create<GameStore>((set, get) => ({
     saveToLocalStorage(updated)
   },
 
+  // ── Sell surplus timber ─────────────────────────────────────────────────────
+  sellTimber: (units) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const available = gameState.timberOnHand ?? 0
+    const toSell = Math.min(units, available)
+    if (toSell <= 0) return
+    const revenue = toSell * TIMBER_SALE_PRICE_PER_UNIT
+    const newCash = gameState.finances.cashOnHand + revenue
+    const updated: GameState = {
+      ...gameState,
+      timberOnHand: available - toSell,
+      finances: { ...gameState.finances, cashOnHand: newCash },
+      transactionLog: [...gameState.transactionLog, recordTransaction({
+        description:   `Sold ${toSell} units of timber ($${TIMBER_SALE_PRICE_PER_UNIT}/unit)`,
+        amount:        revenue,
+        newCashOnHand: newCash,
+        season:        gameState.currentSeason,
+        year:          gameState.currentYear,
+      })],
+    }
+    set({ gameState: updated })
+    saveToLocalStorage(updated)
+  },
+
   // ── Buy seeds for a crop ──────────────────────────────────────────────────
   buySeeds: (crop) => {
     const { gameState } = get()
@@ -755,6 +783,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
     if (!gameState) return
     if (gameState.finances.cashOnHand < CABIN_BUILD_COST_MIN) return
 
+    const timberCost  = TIMBER_PER_CABIN_BUILD
+    const timberAfter = Math.max(0, (gameState.timberOnHand ?? 0) - timberCost)
     const newId   = `cabin-${Date.now()}`
     const newCash = gameState.finances.cashOnHand - CABIN_BUILD_COST_MIN
     const newCabin = {
@@ -767,10 +797,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const updated: GameState = {
       ...gameState,
-      cabins:   [...gameState.cabins, newCabin],
+      cabins:      [...gameState.cabins, newCabin],
+      timberOnHand: timberAfter,
       finances: { ...gameState.finances, cashOnHand: newCash },
       transactionLog: [...gameState.transactionLog, recordTransaction({
-        description:   `Built new cabin (+4 capacity)`,
+        description:   `Built new cabin (+4 capacity, used ${timberCost} timber)`,
         amount:        -CABIN_BUILD_COST_MIN,
         newCashOnHand: newCash,
         season:        gameState.currentSeason,
@@ -959,6 +990,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     blanketsOnHand:  4,
     cornOnHand:      8,
     clearedMaterialOnHand: 0,
+    timberOnHand:    20,  // reasonable starting stock for an established grant
     seedInventory:   {},
     ownerHouseLevel:         0,
     compostFacilityBuilt:    false,
