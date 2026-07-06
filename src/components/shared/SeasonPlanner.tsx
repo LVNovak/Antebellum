@@ -92,6 +92,7 @@ export default function SeasonPlanner() {
   const setCompostWorkers    = useGameStore(s => s.setCompostWorkers)
   const sellTimber           = useGameStore(s => s.sellTimber)
   const setFamilyTask        = useGameStore(s => s.setFamilyTask)
+  const setSkilledWorkerTask = useGameStore(s => s.setSkilledWorkerTask)
   const confirmPlanAndAdvance = useGameStore(s => s.confirmPlanAndAdvance)
   const closeSeasonPlanner   = useGameStore(s => s.closeSeasonPlanner)
   const buySupplies          = useGameStore(s => s.buySupplies)
@@ -116,6 +117,12 @@ export default function SeasonPlanner() {
   const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
   const [queueFlash,   setQueueFlash]   = useState<Partial<Record<CropType, boolean>>>({})
   const [buyFlash,     setBuyFlash]     = useState(false)
+  const [actionFlash,  setActionFlash]  = useState<Record<string, boolean>>({})
+
+  function flashAction(key: string) {
+    setActionFlash(p => ({ ...p, [key]: true }))
+    setTimeout(() => setActionFlash(p => ({ ...p, [key]: false })), 600)
+  }
 
   function flashQueue(crop: CropType) {
     setQueueFlash(p => ({ ...p, [crop]: true }))
@@ -131,7 +138,8 @@ export default function SeasonPlanner() {
     compostFacilityBuilt, coverCropSeedStockOwned,
     family, timberOnHand,
   } = gameState
-  const totalWorkers     = workers.length
+  const pinnedSkilledCount = Object.values(seasonPlan.skilledAssignments ?? {}).filter(t => t !== null && t !== undefined).length
+  const totalWorkers     = workers.length - pinnedSkilledCount
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
   const overAllocated    = remaining < 0
@@ -374,10 +382,10 @@ export default function SeasonPlanner() {
                         Compost cleared material onto this field
                       </span>
                       <button
-                        onClick={() => compostTile(tile.id)}
-                        className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs"
+                        onClick={() => { compostTile(tile.id); flashAction(`compost-${tile.id}`) }}
+                        className={`px-3 py-1 rounded text-xs transition-colors duration-300 ${actionFlash[`compost-${tile.id}`] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                       >
-                        Apply (1 unit)
+                        {actionFlash[`compost-${tile.id}`] ? '✓ Applied' : 'Apply (1 unit)'}
                       </button>
                     </div>
                   )}
@@ -393,21 +401,189 @@ export default function SeasonPlanner() {
             </div>
           )}
 
+          {/* ── SKILLED ASSIGNMENTS ── */}
+          {workers.filter(w => w.skill !== 'Field').length > 0 && (
+            <Section title="Skilled Assignments">
+              <p className="px-4 pt-2 text-earth-500 text-xs">
+                Pin a skilled worker to a specific task so their talent actually lands where it's needed.
+              </p>
+              {workers.filter(w => w.skill !== 'Field').map(worker => {
+                const currentTask = seasonPlan.skilledAssignments[worker.id] ?? worker.assignedTask ?? null
+                const currentType = currentTask?.type ?? 'null'
+                const needsTile = currentType === 'PlantCrop' || currentType === 'TendCrop' || currentType === 'HarvestCrop'
+                const currentTileId = needsTile && currentTask && 'tileId' in currentTask ? currentTask.tileId : ''
+                const currentCropChoice = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
+
+                // Recommend the task that matches the worker's skill
+                const RECOMMENDED_TASK: Record<string, string> = {
+                  Cooper:     'ManageStorage',
+                  Carpenter:  'RepairCabin',
+                  Cook:       'PlantCrop',
+                  Blacksmith: 'PlantCrop',
+                }
+
+                const TASK_TYPES = [
+                  { label: 'Rest', value: 'null' },
+                  { label: 'Clear Land', value: 'ClearLand' },
+                  { label: 'Plant Crop', value: 'PlantCrop' },
+                  { label: 'Tend Crop', value: 'TendCrop' },
+                  { label: 'Harvest Crop', value: 'HarvestCrop' },
+                  { label: 'Repair Cabin', value: 'RepairCabin' },
+                  { label: 'Manage Storage', value: 'ManageStorage' },
+                  { label: 'Tend Compost', value: 'TendCompost' },
+                ]
+
+                const tileOptions = tiles.filter(t => {
+                  if (!t.isCleared) return false
+                  if (currentType === 'PlantCrop') return !t.currentCrop
+                  if (currentType === 'TendCrop' || currentType === 'HarvestCrop') return !!t.currentCrop
+                  return false
+                })
+
+                function handleTypeChange(newType: string) {
+                  if (newType === 'null') { setSkilledWorkerTask(worker.id, null); return }
+                  if (newType === 'ClearLand')     { setSkilledWorkerTask(worker.id, { type: 'ClearLand' }); return }
+                  if (newType === 'RepairCabin')   { setSkilledWorkerTask(worker.id, { type: 'RepairCabin' }); return }
+                  if (newType === 'ManageStorage') { setSkilledWorkerTask(worker.id, { type: 'ManageStorage' }); return }
+                  if (newType === 'TendCompost')   { setSkilledWorkerTask(worker.id, { type: 'TendCompost' }); return }
+                  if (newType === 'PlantCrop')  { setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId: '', crop: null }); return }
+                  if (newType === 'TendCrop')   { setSkilledWorkerTask(worker.id, { type: 'TendCrop', tileId: '' }); return }
+                  if (newType === 'HarvestCrop'){ setSkilledWorkerTask(worker.id, { type: 'HarvestCrop', tileId: '' }); return }
+                }
+
+                function handleTileChange(tileId: string) {
+                  if (currentType === 'PlantCrop') {
+                    setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId, crop: currentCropChoice })
+                  } else if (currentType === 'TendCrop') {
+                    setSkilledWorkerTask(worker.id, { type: 'TendCrop', tileId })
+                  } else if (currentType === 'HarvestCrop') {
+                    setSkilledWorkerTask(worker.id, { type: 'HarvestCrop', tileId })
+                  }
+                }
+
+                function handleCropChange(crop: CropType) {
+                  setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId: currentTileId, crop })
+                }
+
+                const isOptimal = currentType === RECOMMENDED_TASK[worker.skill]
+
+                return (
+                  <div key={worker.id} className="px-4 py-3 border-b border-earth-800 last:border-0">
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <span className="text-earth-200 text-sm font-bold">{worker.name}</span>
+                        <span className="text-soil-good text-xs ml-2 font-semibold">{worker.skill}</span>
+                      </div>
+                      {isOptimal && <span className="text-soil-good text-xs">Skill active</span>}
+                    </div>
+                    <select
+                      value={currentType}
+                      onChange={e => handleTypeChange(e.target.value)}
+                      className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
+                    >
+                      {TASK_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
+                      ))}
+                    </select>
+                    {needsTile && (
+                      <select
+                        value={currentTileId}
+                        onChange={e => handleTileChange(e.target.value)}
+                        className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded mt-2"
+                      >
+                        <option value="">Select a tile…</option>
+                        {tileOptions.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.terrain} {t.id} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {currentType === 'PlantCrop' && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {availableCrops.length > 0 ? availableCrops.map(crop => (
+                          <button
+                            key={crop}
+                            onClick={() => handleCropChange(crop)}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${
+                              currentCropChoice === crop
+                                ? 'bg-earth-500 border-earth-300 text-earth-100'
+                                : 'bg-earth-800 border-earth-700 text-earth-400'
+                            }`}
+                          >
+                            {CROP_LABELS[crop]}
+                          </button>
+                        )) : (
+                          <p className="text-soil-poor text-xs">No seeds available — buy seeds below.</p>
+                        )}
+                      </div>
+                    )}
+                    {needsTile && (!currentTileId || (currentType === 'PlantCrop' && !currentCropChoice)) && (
+                      <p className="text-soil-poor text-xs mt-1">
+                        {!currentTileId ? 'Select a tile — no tile chosen means no effect.' : 'Select a crop to plant.'}
+                      </p>
+                    )}
+                  </div>
+                )
+              })}
+            </Section>
+          )}
+
           {/* ── FAMILY LABOR ── */}
           {(family ?? []).filter(m => m.laborUnits > 0).length > 0 && (
             <Section title="Household Labor">
               {(family ?? []).filter(m => m.laborUnits > 0).map(member => {
                 const currentTask = seasonPlan.familyAssignments[member.id] ?? null
-                const FAMILY_TASKS = [
-                  { label: 'Rest', value: null },
-                  { label: 'Clear Land', value: { type: 'ClearLand' as const } },
-                  { label: 'Plant Crop', value: { type: 'PlantCrop' as const, tileId: '', crop: null } },
-                  { label: 'Tend Crop', value: { type: 'TendCrop' as const, tileId: '' } },
-                  { label: 'Harvest Crop', value: { type: 'HarvestCrop' as const, tileId: '' } },
-                  { label: 'Repair Cabin', value: { type: 'RepairCabin' as const } },
-                  { label: 'Manage Storage', value: { type: 'ManageStorage' as const } },
-                  { label: 'Tend Compost', value: { type: 'TendCompost' as const } },
+                const currentType = currentTask?.type ?? 'null'
+                const needsTile = currentType === 'PlantCrop' || currentType === 'TendCrop' || currentType === 'HarvestCrop'
+                const currentTileId = needsTile && currentTask && 'tileId' in currentTask ? currentTask.tileId : ''
+                const currentCropChoice = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
+
+                const TASK_TYPES = [
+                  { label: 'Rest', value: 'null' },
+                  { label: 'Clear Land', value: 'ClearLand' },
+                  { label: 'Plant Crop', value: 'PlantCrop' },
+                  { label: 'Tend Crop', value: 'TendCrop' },
+                  { label: 'Harvest Crop', value: 'HarvestCrop' },
+                  { label: 'Repair Cabin', value: 'RepairCabin' },
+                  { label: 'Manage Storage', value: 'ManageStorage' },
+                  { label: 'Tend Compost', value: 'TendCompost' },
                 ]
+
+                // Tile options depend on task: Plant needs cleared+empty tiles,
+                // Tend/Harvest need tiles with a crop already in the ground.
+                const tileOptions = tiles.filter(t => {
+                  if (!t.isCleared) return false
+                  if (currentType === 'PlantCrop') return !t.currentCrop
+                  if (currentType === 'TendCrop' || currentType === 'HarvestCrop') return !!t.currentCrop
+                  return false
+                })
+
+                function handleTypeChange(newType: string) {
+                  if (newType === 'null') { setFamilyTask(member.id, null); return }
+                  if (newType === 'ClearLand')     { setFamilyTask(member.id, { type: 'ClearLand' }); return }
+                  if (newType === 'RepairCabin')   { setFamilyTask(member.id, { type: 'RepairCabin' }); return }
+                  if (newType === 'ManageStorage') { setFamilyTask(member.id, { type: 'ManageStorage' }); return }
+                  if (newType === 'TendCompost')   { setFamilyTask(member.id, { type: 'TendCompost' }); return }
+                  if (newType === 'PlantCrop')  { setFamilyTask(member.id, { type: 'PlantCrop', tileId: '', crop: null }); return }
+                  if (newType === 'TendCrop')   { setFamilyTask(member.id, { type: 'TendCrop', tileId: '' }); return }
+                  if (newType === 'HarvestCrop'){ setFamilyTask(member.id, { type: 'HarvestCrop', tileId: '' }); return }
+                }
+
+                function handleTileChange(tileId: string) {
+                  if (currentType === 'PlantCrop') {
+                    setFamilyTask(member.id, { type: 'PlantCrop', tileId, crop: currentCropChoice })
+                  } else if (currentType === 'TendCrop') {
+                    setFamilyTask(member.id, { type: 'TendCrop', tileId })
+                  } else if (currentType === 'HarvestCrop') {
+                    setFamilyTask(member.id, { type: 'HarvestCrop', tileId })
+                  }
+                }
+
+                function handleCropChange(crop: CropType) {
+                  setFamilyTask(member.id, { type: 'PlantCrop', tileId: currentTileId, crop })
+                }
+
                 return (
                   <div key={member.id} className="px-4 py-3 border-b border-earth-800 last:border-0">
                     <div className="flex items-center justify-between mb-2">
@@ -418,19 +594,52 @@ export default function SeasonPlanner() {
                       <span className="text-soil-good text-xs">No wage cost</span>
                     </div>
                     <select
-                      value={currentTask ? JSON.stringify(currentTask) : 'null'}
-                      onChange={e => {
-                        const val = e.target.value === 'null' ? null : JSON.parse(e.target.value)
-                        setFamilyTask(member.id, val)
-                      }}
+                      value={currentType}
+                      onChange={e => handleTypeChange(e.target.value)}
                       className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
                     >
-                      {FAMILY_TASKS.map(t => (
-                        <option key={t.label} value={t.value === null ? 'null' : JSON.stringify(t.value)}>
-                          {t.label}
-                        </option>
+                      {TASK_TYPES.map(t => (
+                        <option key={t.value} value={t.value}>{t.label}</option>
                       ))}
                     </select>
+                    {needsTile && (
+                      <select
+                        value={currentTileId}
+                        onChange={e => handleTileChange(e.target.value)}
+                        className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded mt-2"
+                      >
+                        <option value="">Select a tile…</option>
+                        {tileOptions.map(t => (
+                          <option key={t.id} value={t.id}>
+                            {t.terrain} {t.id} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {currentType === 'PlantCrop' && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {availableCrops.length > 0 ? availableCrops.map(crop => (
+                          <button
+                            key={crop}
+                            onClick={() => handleCropChange(crop)}
+                            className={`px-2 py-1 rounded text-xs border transition-colors ${
+                              currentCropChoice === crop
+                                ? 'bg-earth-500 border-earth-300 text-earth-100'
+                                : 'bg-earth-800 border-earth-700 text-earth-400'
+                            }`}
+                          >
+                            {CROP_LABELS[crop]}
+                          </button>
+                        )) : (
+                          <p className="text-soil-poor text-xs">No seeds available — buy seeds below.</p>
+                        )}
+                      </div>
+                    )}
+                    {needsTile && (!currentTileId || (currentType === 'PlantCrop' && !currentCropChoice)) && (
+                      <p className="text-soil-poor text-xs mt-1">
+                        {!currentTileId ? 'Select a tile — no tile chosen means no effect.' : 'Select a crop to plant.'}
+                      </p>
+                    )}
                   </div>
                 )
               })}
@@ -616,11 +825,11 @@ export default function SeasonPlanner() {
                   <p className="text-earth-400 text-xs">Sell surplus at ${TIMBER_SALE_PRICE_PER_UNIT}/unit</p>
                 </div>
                 <button
-                  onClick={() => sellTimber(timberOnHand ?? 0)}
+                  onClick={() => { sellTimber(timberOnHand ?? 0); flashAction('sellTimber') }}
                   disabled={(timberOnHand ?? 0) === 0}
-                  className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                  className={`px-3 py-1.5 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash.sellTimber ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                 >
-                  Sell All
+                  {actionFlash.sellTimber ? '✓ Sold' : 'Sell All'}
                 </button>
               </div>
             </div>
@@ -641,15 +850,17 @@ export default function SeasonPlanner() {
                   </p>
                 </div>
                 <button
-                  onClick={buildNewCabin}
+                  onClick={() => { buildNewCabin(); flashAction('buildCabin') }}
                   disabled={finances.cashOnHand < CABIN_BUILD_COST_MIN || (timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD}
-                  className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                  className={`px-3 py-1.5 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash.buildCabin ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                 >
-                  {finances.cashOnHand < CABIN_BUILD_COST_MIN
-                    ? `Need $${CABIN_BUILD_COST_MIN}`
-                    : (timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD
-                      ? `Need ${TIMBER_PER_CABIN_BUILD} timber`
-                      : 'Build'}
+                  {actionFlash.buildCabin
+                    ? '✓ Built'
+                    : finances.cashOnHand < CABIN_BUILD_COST_MIN
+                      ? `Need $${CABIN_BUILD_COST_MIN}`
+                      : (timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD
+                        ? `Need ${TIMBER_PER_CABIN_BUILD} timber`
+                        : 'Build'}
                 </button>
               </div>
               {!storehouseBuilt && (
@@ -659,9 +870,9 @@ export default function SeasonPlanner() {
                     <p className="text-earth-500 text-xs">Unlocks 50-unit crop storage. Required to sell crops.</p>
                     <p className="text-earth-400 text-xs">${SMOKEHOUSE_BUILD_COST_MIN}</p>
                   </div>
-                  <button onClick={buildSmokehouse} disabled={!canAffordStorehouse}
-                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40">
-                    {canAffordStorehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
+                  <button onClick={() => { buildSmokehouse(); flashAction('buildStorehouse') }} disabled={!canAffordStorehouse}
+                    className={`px-3 py-1.5 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash.buildStorehouse ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}>
+                    {actionFlash.buildStorehouse ? '✓ Built' : canAffordStorehouse ? 'Build' : `Need $${SMOKEHOUSE_BUILD_COST_MIN}`}
                   </button>
                 </div>
               )}

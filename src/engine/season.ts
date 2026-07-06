@@ -1105,14 +1105,14 @@ function countCombinedByTask(
   for (const worker of workers) {
     const task = worker.assignedTask
     if (!task || task.type !== taskType) continue
-    if (!('tileId' in task)) continue
+    if (!('tileId' in task) || !task.tileId) continue
     counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + 1)
   }
   for (const member of (family ?? [])) {
     if (member.laborUnits <= 0) continue
     const task = member.assignedTask
     if (!task || task.type !== taskType) continue
-    if (!('tileId' in task)) continue
+    if (!('tileId' in task) || !task.tileId) continue
     counts.set(task.tileId, (counts.get(task.tileId) ?? 0) + Math.max(1, Math.floor(member.laborUnits)))
   }
   return counts

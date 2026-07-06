@@ -64,6 +64,9 @@ export interface SeasonPlan {
   compostWorkers: number
   // Family member task assignments — keyed by family member id
   familyAssignments: Record<string, WorkerTask | null>
+  // Named pinned task assignments for skilled workers — takes priority over
+  // the count-based bulk assignment below, so skill actually lands where chosen.
+  skilledAssignments: Record<string, WorkerTask | null>
 }
 
 export type TileAction =
@@ -104,6 +107,7 @@ interface GameStore {
   setStorageWorkers:      (count: number) => void
   setCompostWorkers:      (count: number) => void
   setFamilyTask:          (memberId: string, task: WorkerTask | null) => void
+  setSkilledWorkerTask:   (workerId: string, task: WorkerTask | null) => void
   confirmPlanAndAdvance:  () => void
 
   // Supply and build actions
@@ -147,7 +151,7 @@ interface NewGameParams {
 // ---------------------------------------------------------------------------
 
 function emptySeasonPlan(): SeasonPlan {
-  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0, compostWorkers: 0, familyAssignments: {} }
+  return { tileAllocations: {}, cabinRepairWorkers: 0, storageWorkers: 0, compostWorkers: 0, familyAssignments: {}, skilledAssignments: {} }
 }
 
 export function countAllocatedWorkers(plan: SeasonPlan): number {
@@ -163,9 +167,15 @@ export function countAllocatedWorkers(plan: SeasonPlan): number {
  * Returns updated workers with assignedTask set.
  */
 function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['workers'] {
-  // Build a flat list of assignments: [workerId, task]
-  // We assign workers in order from the roster — the engine handles
-  // individual productivity from there.
+  // Pinned skilled-worker assignments take priority — these workers are
+  // removed from the general labor pool and given their chosen task directly.
+  const pinned = plan.skilledAssignments ?? {}
+  const pinnedIds = new Set(
+    Object.entries(pinned).filter(([, task]) => task !== null && task !== undefined).map(([id]) => id)
+  )
+
+  // Build a flat list of assignments: [task, task, ...] for the count-based
+  // bulk system. This pool is only distributed among UNPINNED workers.
   const assignments: Array<GameState['workers'][0]['assignedTask']> = []
 
   // Tile assignments
@@ -199,11 +209,18 @@ function applyPlanToWorkers(state: GameState, plan: SeasonPlan): GameState['work
     assignments.push({ type: 'TendCompost' })
   }
 
-  // Assign workers in roster order; remaining workers rest
-  return state.workers.map((worker, index) => ({
-    ...worker,
-    assignedTask: index < assignments.length ? assignments[index] : { type: 'Rest' as const },
-  }))
+  // Fill unpinned workers, in roster order, from the count-based pool.
+  // Pinned workers get their named assignment directly and don't consume
+  // slots from the flat pool.
+  let poolIndex = 0
+  return state.workers.map(worker => {
+    if (pinnedIds.has(worker.id)) {
+      return { ...worker, assignedTask: pinned[worker.id] }
+    }
+    const task = poolIndex < assignments.length ? assignments[poolIndex] : { type: 'Rest' as const }
+    poolIndex += 1
+    return { ...worker, assignedTask: task }
+  })
 }
 
 /**
@@ -219,9 +236,21 @@ function applyFamilyPlan(state: GameState, plan: SeasonPlan): GameState['family'
 
 function applyPlanToTiles(state: GameState, plan: SeasonPlan): GameState['tiles'] {
   return state.tiles.map(tile => {
+    // Regular worker-count-based planting
     const action = plan.tileAllocations[tile.id]
-    if (!action || action.type !== 'Plant') return tile
-    return { ...tile, currentCrop: action.crop, seasonsInGround: 0 }
+    if (action && action.type === 'Plant') {
+      return { ...tile, currentCrop: action.crop, seasonsInGround: 0 }
+    }
+
+    // Family/household member planting — same effect, different plan source
+    const familyPlanting = Object.values(plan.familyAssignments).find(
+      t => t && t.type === 'PlantCrop' && 'tileId' in t && t.tileId === tile.id
+    )
+    if (familyPlanting && familyPlanting.type === 'PlantCrop') {
+      return { ...tile, currentCrop: familyPlanting.crop, seasonsInGround: 0 }
+    }
+
+    return tile
   })
 }
 
@@ -286,6 +315,16 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
   })),
 
+  setSkilledWorkerTask: (workerId, task) => set(s => ({
+    seasonPlan: {
+      ...s.seasonPlan,
+      skilledAssignments: {
+        ...s.seasonPlan.skilledAssignments,
+        [workerId]: task,
+      }
+    }
+  })),
+
   // ── Confirm plan and advance season ──────────────────────────────────────
   confirmPlanAndAdvance: () => {
     const { gameState, seasonPlan } = get()
@@ -314,6 +353,13 @@ export const useGameStore = create<GameStore>((set, get) => ({
         // to Rest every season — player only needs to change if they want to
         familyAssignments: Object.fromEntries(
           (nextState.family ?? []).map(m => [m.id, m.assignedTask])
+        ),
+        // Same treatment for pinned skilled workers — they keep their named
+        // task each season unless the player changes it.
+        skilledAssignments: Object.fromEntries(
+          nextState.workers
+            .filter(w => w.skill !== 'Field')
+            .map(w => [w.id, w.assignedTask])
         ),
       },
     })
