@@ -30,6 +30,7 @@ import {
   LABOR_SEASONAL_COST,
   CABIN_BUILD_COST_MIN,
   TIMBER_PER_CABIN_BUILD,
+  TIMBER_SALE_PRICE_PER_UNIT,
   LABOR_UNITS_PER_WORKER_PER_SEASON,
   LAND_CLEARING_COST,
   CROP_LABOR_TO_PLANT,
@@ -606,26 +607,26 @@ export default function SeasonPlanner() {
           </Section>
 
           {/* ── TIMBER ── */}
-          {(timberOnHand ?? 0) > 0 && (
-            <Section title="Timber">
-              <div className="px-4 py-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div>
-                    <span className="text-earth-200 text-sm font-bold">{timberOnHand ?? 0} units on hand</span>
-                    <p className="text-earth-500 text-xs">Used for cabin construction, repairs, and cooking fuel.</p>
-                    <p className="text-earth-400 text-xs">Sell surplus at $2/unit</p>
-                  </div>
-                  <button
-                    onClick={() => sellTimber(timberOnHand ?? 0)}
-                    disabled={(timberOnHand ?? 0) === 0}
-                    className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
-                  >
-                    Sell All
-                  </button>
+          <Section title="Timber">
+            <div className="px-4 py-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-earth-200 text-sm font-bold">{timberOnHand ?? 0} units on hand</span>
+                  <p className="text-earth-500 text-xs">Used for cabin construction, repairs, and cooking fuel.</p>
+                  <p className="text-earth-400 text-xs">Sell surplus at ${TIMBER_SALE_PRICE_PER_UNIT}/unit</p>
                 </div>
+                <button
+                  onClick={() => sellTimber(timberOnHand ?? 0)}
+                  disabled={(timberOnHand ?? 0) === 0}
+                  className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                >
+                  Sell All
+                </button>
               </div>
-            </Section>
-          )}
+            </div>
+          </Section>
+
+          {/* ── BUILD & SEEDS ── */}
           <Section title="Build & Seeds">
             <div className="px-4 py-3 space-y-4">
 
@@ -641,10 +642,14 @@ export default function SeasonPlanner() {
                 </div>
                 <button
                   onClick={buildNewCabin}
-                  disabled={finances.cashOnHand < CABIN_BUILD_COST_MIN}
+                  disabled={finances.cashOnHand < CABIN_BUILD_COST_MIN || (timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD}
                   className="px-3 py-1.5 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
                 >
-                  {finances.cashOnHand >= CABIN_BUILD_COST_MIN ? 'Build' : `Need $${CABIN_BUILD_COST_MIN}`}
+                  {finances.cashOnHand < CABIN_BUILD_COST_MIN
+                    ? `Need $${CABIN_BUILD_COST_MIN}`
+                    : (timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD
+                      ? `Need ${TIMBER_PER_CABIN_BUILD} timber`
+                      : 'Build'}
                 </button>
               </div>
               {!storehouseBuilt && (

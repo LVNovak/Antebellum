@@ -782,9 +782,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
     const { gameState } = get()
     if (!gameState) return
     if (gameState.finances.cashOnHand < CABIN_BUILD_COST_MIN) return
+    if ((gameState.timberOnHand ?? 0) < TIMBER_PER_CABIN_BUILD) return
 
-    const timberCost  = TIMBER_PER_CABIN_BUILD
-    const timberAfter = Math.max(0, (gameState.timberOnHand ?? 0) - timberCost)
+    const timberAfter = (gameState.timberOnHand ?? 0) - TIMBER_PER_CABIN_BUILD
     const newId   = `cabin-${Date.now()}`
     const newCash = gameState.finances.cashOnHand - CABIN_BUILD_COST_MIN
     const newCabin = {
@@ -797,11 +797,11 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     const updated: GameState = {
       ...gameState,
-      cabins:      [...gameState.cabins, newCabin],
+      cabins:       [...gameState.cabins, newCabin],
       timberOnHand: timberAfter,
       finances: { ...gameState.finances, cashOnHand: newCash },
       transactionLog: [...gameState.transactionLog, recordTransaction({
-        description:   `Built new cabin (+4 capacity, used ${timberCost} timber)`,
+        description:   `Built new cabin (+4 capacity, used ${TIMBER_PER_CABIN_BUILD} timber)`,
         amount:        -CABIN_BUILD_COST_MIN,
         newCashOnHand: newCash,
         season:        gameState.currentSeason,
@@ -943,10 +943,28 @@ function loadFromLocalStorage(): GameState | null {
   try {
     const raw = localStorage.getItem(SAVE_KEY)
     if (!raw) return null
-    return JSON.parse(raw) as GameState
+    const parsed = JSON.parse(raw) as GameState
+    return migrateSaveState(parsed)
   } catch (e) {
     console.warn('Could not load save:', e)
     return null
+  }
+}
+
+/**
+ * Backfills fields added in later batches onto saves created under older
+ * versions. Without this, loading an older save leaves new fields undefined,
+ * silently disabling features that check `field > 0` or `.length`.
+ */
+function migrateSaveState(state: GameState): GameState {
+  return {
+    ...state,
+    family:               state.family ?? [],
+    ownerHouseLevel:      state.ownerHouseLevel ?? 0,
+    enslavedUsedThisYear: state.enslavedUsedThisYear ?? false,
+    yearlyRevenue:        state.yearlyRevenue ?? 0,
+    timberOnHand:         state.timberOnHand ?? 20,
+    clearedMaterialOnHand: state.clearedMaterialOnHand ?? 0,
   }
 }
 

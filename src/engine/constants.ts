@@ -317,9 +317,8 @@ export const TIMBER_YIELD_ON_CLEAR: Record<TerrainType, number> = {
 }
 
 /** Timber consumed per season across the whole plantation for cooking fires.
- *  Colonial households burned wood constantly but had abundant standing timber.
- *  This is a soft background drain, not a dominant cost. */
-export const TIMBER_COOKING_FUEL_PER_SEASON = 1   // whole plantation, not per cabin
+ *  Flat background drain — not per cabin. */
+export const TIMBER_COOKING_FUEL_PER_SEASON = 1
 
 /** Timber consumed when building a new cabin (~400 sq ft, hewn log construction). */
 export const TIMBER_PER_CABIN_BUILD = 14

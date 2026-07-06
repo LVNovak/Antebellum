@@ -581,13 +581,13 @@ export interface DebugEntry {
     upkeepInterest: number
   }
 
-  events: string[]
-
   supplies: {
     cornOnHand:     number
     timberOnHand:   number
     blanketsOnHand: number
   }
+
+  events: string[]
 }
 
 // ---------------------------------------------------------------------------
