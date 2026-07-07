@@ -17,11 +17,15 @@ export default function TopBar() {
 
   if (!gameState) return null
 
-  const { currentSeason, currentYear, finances, workers, cornOnHand, blanketsOnHand } = gameState
+  const { currentSeason, currentYear, finances, workers, cornOnHand, blanketsOnHand, timberOnHand, debugLog } = gameState
   const totalDebt = finances.factorAdvanceDebt + finances.mortgageDebt + finances.personalNoteDebt
 
   const cornLow     = cornOnHand < workers.length
   const blanketsLow = blanketsOnHand < workers.length * 0.25
+
+  // Net cash change last season — read from the most recent debug log entry
+  const lastEntry = debugLog && debugLog.length > 0 ? debugLog[debugLog.length - 1] : null
+  const netLastSeason = lastEntry ? lastEntry.finances.cashEnd - lastEntry.finances.cashStart : null
 
   function handleQuitClick() {
     if (!confirmingQuit) { setConfirmingQuit(true); return }
@@ -40,6 +44,11 @@ export default function TopBar() {
               Cash: <span className={`font-mono font-bold ${finances.cashOnHand >= 0 ? 'text-soil-good' : 'text-soil-poor'}`}>
                 ${finances.cashOnHand.toFixed(0)}
               </span>
+              {netLastSeason !== null && (
+                <span className={`font-mono text-[10px] ml-1 ${netLastSeason >= 0 ? 'text-soil-good' : 'text-soil-poor'}`}>
+                  ({netLastSeason >= 0 ? '+' : ''}{netLastSeason.toFixed(0)} last season)
+                </span>
+              )}
             </span>
             {totalDebt > 0 && (
               <span className="text-earth-400 text-xs">
@@ -54,6 +63,11 @@ export default function TopBar() {
             <span className="text-earth-400 text-xs">
               Blankets: <span className={`font-mono font-bold ${blanketsLow ? 'text-soil-poor' : 'text-earth-200'}`}>
                 {blanketsOnHand}
+              </span>
+            </span>
+            <span className="text-earth-400 text-xs">
+              Timber: <span className="font-mono font-bold text-earth-200">
+                {timberOnHand ?? 0}
               </span>
             </span>
             <span className="text-earth-400 text-xs">

@@ -121,6 +121,12 @@ interface GameStore {
 
   // Land and labor acquisition
   buyLandParcel:          (terrain: TerrainType, isWaterAdjacent: boolean) => void
+  createField:            (name: string) => void
+  renameField:            (fieldId: string, name: string) => void
+  deleteField:            (fieldId: string) => void
+  addTileToField:         (fieldId: string, tileId: string) => void
+  removeTileFromField:    (fieldId: string, tileId: string) => void
+  setFieldMixedCropMode:  (fieldId: string, mixed: boolean) => void
   hireWorker:             (laborType: LaborType) => void
 
   // Soil management
@@ -248,6 +254,16 @@ function applyPlanToTiles(state: GameState, plan: SeasonPlan): GameState['tiles'
     )
     if (familyPlanting && familyPlanting.type === 'PlantCrop') {
       return { ...tile, currentCrop: familyPlanting.crop, seasonsInGround: 0 }
+    }
+
+    // Named skilled-worker planting — same effect, different plan source.
+    // Without this, a skilled worker pinned to Plant Crop shows correctly
+    // in the roster but the tile itself never actually gets planted.
+    const skilledPlanting = Object.values(plan.skilledAssignments ?? {}).find(
+      t => t && t.type === 'PlantCrop' && 'tileId' in t && t.tileId === tile.id
+    )
+    if (skilledPlanting && skilledPlanting.type === 'PlantCrop') {
+      return { ...tile, currentCrop: skilledPlanting.crop, seasonsInGround: 0 }
     }
 
     return tile
@@ -551,6 +567,88 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
     set({ gameState: updated })
     saveToLocalStorage(updated)
+  },
+
+  createField: (name) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const newField = {
+      id:            `field-${Date.now()}`,
+      name:          name.trim() || 'Unnamed Field',
+      tileIds:       [] as string[],
+      mixedCropMode: false,
+    }
+    const updatedField: GameState = {
+      ...gameState,
+      fields: [...(gameState.fields ?? []), newField],
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
+  },
+
+  renameField: (fieldId, name) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updatedField: GameState = {
+      ...gameState,
+      fields: (gameState.fields ?? []).map(f =>
+        f.id === fieldId ? { ...f, name: name.trim() || f.name } : f
+      ),
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
+  },
+
+  deleteField: (fieldId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updatedField: GameState = {
+      ...gameState,
+      fields: (gameState.fields ?? []).filter(f => f.id !== fieldId),
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
+  },
+
+  addTileToField: (fieldId, tileId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updatedField: GameState = {
+      ...gameState,
+      fields: (gameState.fields ?? []).map(f =>
+        f.id === fieldId && !f.tileIds.includes(tileId)
+          ? { ...f, tileIds: [...f.tileIds, tileId] }
+          : f
+      ),
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
+  },
+
+  removeTileFromField: (fieldId, tileId) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updatedField: GameState = {
+      ...gameState,
+      fields: (gameState.fields ?? []).map(f =>
+        f.id === fieldId ? { ...f, tileIds: f.tileIds.filter(id => id !== tileId) } : f
+      ),
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
+  },
+
+  setFieldMixedCropMode: (fieldId, mixed) => {
+    const { gameState } = get()
+    if (!gameState) return
+    const updatedField: GameState = {
+      ...gameState,
+      fields: (gameState.fields ?? []).map(f =>
+        f.id === fieldId ? { ...f, mixedCropMode: mixed } : f
+      ),
+    }
+    set({ gameState: updatedField })
+    saveToLocalStorage(updatedField)
   },
 
   // ── Hire a new worker ──────────────────────────────────────────────────────
@@ -1011,6 +1109,7 @@ function migrateSaveState(state: GameState): GameState {
     yearlyRevenue:        state.yearlyRevenue ?? 0,
     timberOnHand:         state.timberOnHand ?? 20,
     clearedMaterialOnHand: state.clearedMaterialOnHand ?? 0,
+    fields:               state.fields ?? [],
   }
 }
 
@@ -1048,6 +1147,7 @@ function buildInitialGameState(params: NewGameParams): GameState {
     currentYear:     1,
     currentSeason:   Season.Spring,
     tiles:           [grantTile],
+    fields:          [],
     workers:         [worker1, worker2],
     cabins:          [cabin1, cabin2],
     family:          [buildOwner(playerName)],

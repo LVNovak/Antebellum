@@ -11,7 +11,7 @@
  *   - Header: season name + available worker count
  *   - Tile tasks: one row per tile (clear / plant / tend / harvest)
  *   - Maintenance tasks: cabin repair, storage management
- *   - Supply buying: corn and blankets
+ *   - Supply buying: food and blankets
  *   - Build actions: smokehouse if not built
  *   - Sale queuing: if storage has crops
  *   - Footer: allocated count + Confirm button
@@ -99,6 +99,12 @@ export default function SeasonPlanner() {
   const buildSmokehouse      = useGameStore(s => s.buildSmokehouse)
   const queueSale            = useGameStore(s => s.queueSale)
   const buyLandParcel        = useGameStore(s => s.buyLandParcel)
+  const createField          = useGameStore(s => s.createField)
+  const renameField          = useGameStore(s => s.renameField)
+  const deleteField          = useGameStore(s => s.deleteField)
+  const addTileToField       = useGameStore(s => s.addTileToField)
+  const removeTileFromField  = useGameStore(s => s.removeTileFromField)
+  const setFieldMixedCropMode = useGameStore(s => s.setFieldMixedCropMode)
   const hireWorker           = useGameStore(s => s.hireWorker)
   const compostTile          = useGameStore(s => s.compostTile)
   const buySeeds             = useGameStore(s => s.buySeeds)
@@ -117,6 +123,7 @@ export default function SeasonPlanner() {
   const [lastHireMessage, setLastHireMessage] = useState<string | null>(null)
   const [queueFlash,   setQueueFlash]   = useState<Partial<Record<CropType, boolean>>>({})
   const [buyFlash,     setBuyFlash]     = useState(false)
+  const [newFieldName, setNewFieldName] = useState('')
   const [actionFlash,  setActionFlash]  = useState<Record<string, boolean>>({})
 
   function flashAction(key: string) {
@@ -136,10 +143,13 @@ export default function SeasonPlanner() {
     currentSeason, currentYear,
     clearedMaterialOnHand, seedInventory,
     compostFacilityBuilt, coverCropSeedStockOwned,
-    family, timberOnHand,
+    family, timberOnHand, fields,
   } = gameState
-  const pinnedSkilledCount = Object.values(seasonPlan.skilledAssignments ?? {}).filter(t => t !== null && t !== undefined).length
-  const totalWorkers     = workers.length - pinnedSkilledCount
+  const skilledWorkerIds  = workers.filter(w => w.skill !== 'Field').map(w => w.id)
+  const pinnedSkilledCount = Object.entries(seasonPlan.skilledAssignments ?? {})
+    .filter(([id, t]) => t !== null && t !== undefined && skilledWorkerIds.includes(id)).length
+  const generalWorkers   = workers.length - skilledWorkerIds.length
+  const totalWorkers     = generalWorkers
   const allocated        = countAllocatedWorkers(seasonPlan)
   const remaining        = totalWorkers - allocated
   const overAllocated    = remaining < 0
@@ -279,9 +289,16 @@ export default function SeasonPlanner() {
           </div>
           <div className="text-right">
             <div className={`font-mono font-bold text-sm ${overAllocated ? 'text-soil-poor' : 'text-soil-good'}`}>
-              {allocated} / {totalWorkers} workers
-              {activeFamilyUnits > 0 && <span className="text-earth-400 font-normal"> +{activeFamilyUnits} household</span>}
+              {allocated} / {totalWorkers} general
             </div>
+            {skilledWorkerIds.length > 0 && (
+              <div className="font-mono text-xs text-earth-300">
+                {pinnedSkilledCount} / {skilledWorkerIds.length} skilled assigned
+              </div>
+            )}
+            {activeFamilyUnits > 0 && (
+              <div className="font-mono text-xs text-earth-400">+{activeFamilyUnits} household</div>
+            )}
             <div className="text-earth-500 text-xs">
               {remaining > 0 ? `${remaining} resting` : overAllocated ? 'Over-allocated!' : 'All assigned'}
             </div>
@@ -299,7 +316,7 @@ export default function SeasonPlanner() {
 
           {/* ── LAND TASKS ── */}
           <Section title="Land & Crops">
-            {tiles.map(tile => {
+            {tiles.map((tile, tileIndex) => {
               const currentAction = getCurrentTileAction(tile.id)
               const workerCount   = getWorkerCountForTile(tile.id)
               const availableActions = getAvailableActionsForTile(tile)
@@ -310,6 +327,7 @@ export default function SeasonPlanner() {
                 <div key={tile.id} className="px-4 py-3 border-b border-earth-800">
                   <div className="flex items-center justify-between mb-2">
                     <div>
+                      <span className="text-earth-500 text-xs font-mono mr-1">#{tileIndex + 1}</span>
                       <span className="text-earth-200 text-sm font-bold">
                         {getTileDisplayLabel(tile)}
                       </span>
@@ -399,6 +417,194 @@ export default function SeasonPlanner() {
             <div className="px-4 py-2 bg-earth-800/30 text-earth-500 text-xs">
               {clearedMaterialOnHand} unit(s) of cleared material in storage — apply to a field above to boost its soil.
             </div>
+          )}
+
+          {/* ── FIELDS ── */}
+          {tiles.filter(t => t.isCleared).length >= 10 && (
+            <Section title="Fields">
+              <p className="px-4 pt-2 text-earth-500 text-xs">
+                Group tiles into named fields to assign tasks and workers in one action.
+                Each tile still has its own soil — grouping is organizational only.
+              </p>
+
+              <div className="px-4 py-3 flex gap-2 border-b border-earth-800">
+                <input
+                  type="text"
+                  value={newFieldName}
+                  onChange={e => setNewFieldName(e.target.value)}
+                  placeholder="New field name…"
+                  className="flex-1 bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
+                />
+                <button
+                  onClick={() => {
+                    if (newFieldName.trim()) {
+                      createField(newFieldName)
+                      setNewFieldName('')
+                      flashAction('createField')
+                    }
+                  }}
+                  disabled={!newFieldName.trim()}
+                  className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash.createField ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
+                >
+                  {actionFlash.createField ? '✓ Created' : 'Create'}
+                </button>
+              </div>
+
+              {(fields ?? []).map(field => {
+                const fieldTiles = tiles.filter(t => field.tileIds.includes(t.id))
+                const tilesInAnyField = new Set((fields ?? []).flatMap(f => f.tileIds))
+                const availableTilesToAdd = tiles.filter(t => !tilesInAnyField.has(t.id))
+
+                // Aggregate stats for the field summary line
+                const avgYield = fieldTiles.length > 0
+                  ? Math.round(fieldTiles.reduce((s, t) => {
+                      const lastHarvest = t.history?.filter(h => h.yieldProduced > 0).slice(-1)[0]
+                      return s + (lastHarvest?.yieldProduced ?? 0)
+                    }, 0) / fieldTiles.length)
+                  : 0
+                const needsRotation = fieldTiles.some(t => {
+                  const soilAvg = (t.soil.organicMatter + t.soil.nitrogen + t.soil.soilFauna + t.soil.moistureRetention) / 4
+                  return soilAvg < 35
+                })
+
+                // Batch task state — read from the first tile's current action as a proxy
+                const firstTileAction = fieldTiles[0] ? getCurrentTileAction(fieldTiles[0].id) : { type: 'Idle' as const }
+                const fieldTaskType = firstTileAction.type
+                const fieldCrop = firstTileAction.type === 'Plant' ? firstTileAction.crop : null
+                const fieldWorkerTotal = fieldTiles.reduce((s, t) => s + getWorkerCountForTile(t.id), 0)
+
+                function applyFieldTask(taskType: string, crop?: CropType) {
+                  const total = fieldWorkerTotal || fieldTiles.length
+                  const base = Math.floor(total / fieldTiles.length)
+                  const remainder = total % fieldTiles.length
+                  fieldTiles.forEach((t, i) => {
+                    const workersForTile = base + (i < remainder ? 1 : 0)
+                    if (taskType === 'Idle')    { setTileAction(t.id, { type: 'Idle' }); return }
+                    if (taskType === 'Clear')   setTileAction(t.id, { type: 'Clear', workers: Math.max(1, workersForTile) })
+                    if (taskType === 'Tend')    setTileAction(t.id, { type: 'Tend', workers: Math.max(1, workersForTile) })
+                    if (taskType === 'Harvest') setTileAction(t.id, { type: 'Harvest', workers: Math.max(1, workersForTile) })
+                    if (taskType === 'Plant') {
+                      const cropToUse = crop ?? fieldCrop ?? availableCrops[0] ?? CropType.Tobacco
+                      setTileAction(t.id, { type: 'Plant', workers: Math.max(1, workersForTile), crop: cropToUse })
+                    }
+                  })
+                }
+
+                function setFieldWorkerTotal(total: number) {
+                  applyFieldTask(fieldTaskType === 'Idle' ? 'Clear' : fieldTaskType, fieldCrop ?? undefined)
+                  // Re-run distribution with the new total by directly writing here
+                  const base = Math.floor(total / fieldTiles.length)
+                  const remainder = total % fieldTiles.length
+                  fieldTiles.forEach((t, i) => {
+                    const workersForTile = base + (i < remainder ? 1 : 0)
+                    const taskType = fieldTaskType === 'Idle' ? 'Clear' : fieldTaskType
+                    if (taskType === 'Clear')   setTileAction(t.id, { type: 'Clear', workers: workersForTile })
+                    if (taskType === 'Tend')    setTileAction(t.id, { type: 'Tend', workers: workersForTile })
+                    if (taskType === 'Harvest') setTileAction(t.id, { type: 'Harvest', workers: workersForTile })
+                    if (taskType === 'Plant') {
+                      const cropToUse = fieldCrop ?? availableCrops[0] ?? CropType.Tobacco
+                      setTileAction(t.id, { type: 'Plant', workers: workersForTile, crop: cropToUse })
+                    }
+                  })
+                }
+
+                return (
+                  <div key={field.id} className="px-4 py-3 border-b border-earth-800 last:border-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <input
+                        type="text"
+                        defaultValue={field.name}
+                        onBlur={e => renameField(field.id, e.target.value)}
+                        className="bg-transparent text-earth-100 text-sm font-bold border-b border-transparent focus:border-earth-600 outline-none"
+                      />
+                      <button
+                        onClick={() => deleteField(field.id)}
+                        className="text-earth-500 text-xs hover:text-soil-poor"
+                      >
+                        Delete
+                      </button>
+                    </div>
+
+                    <p className="text-earth-500 text-xs mb-2">
+                      {fieldTiles.length} tile{fieldTiles.length !== 1 ? 's' : ''}
+                      {fieldTiles.length > 0 && `, last yield avg ${avgYield}/tile`}
+                      {needsRotation && <span className="text-soil-poor"> — rotation needed</span>}
+                    </p>
+
+                    <div className="flex flex-wrap gap-1 mb-2">
+                      {fieldTiles.map(t => (
+                        <span key={t.id} className="inline-flex items-center gap-1 bg-earth-700 text-earth-300 text-[10px] px-1.5 py-0.5 rounded">
+                          #{tiles.findIndex(x => x.id === t.id) + 1}
+                          <button onClick={() => removeTileFromField(field.id, t.id)} className="text-earth-500 hover:text-soil-poor">×</button>
+                        </span>
+                      ))}
+                    </div>
+
+                    {availableTilesToAdd.length > 0 && (
+                      <select
+                        value=""
+                        onChange={e => { if (e.target.value) addTileToField(field.id, e.target.value) }}
+                        className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-xs px-2 py-1 rounded mb-2"
+                      >
+                        <option value="">Add a tile…</option>
+                        {availableTilesToAdd.map(t => (
+                          <option key={t.id} value={t.id}>
+                            #{tiles.findIndex(x => x.id === t.id) + 1} — {t.terrain} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+
+                    <label className="flex items-center gap-2 text-earth-400 text-xs mb-2">
+                      <input
+                        type="checkbox"
+                        checked={field.mixedCropMode}
+                        onChange={e => setFieldMixedCropMode(field.id, e.target.checked)}
+                      />
+                      Advanced: allow mixed crops (manage tiles individually above)
+                    </label>
+
+                    {!field.mixedCropMode && fieldTiles.length > 0 && (
+                      <div className="bg-earth-900 rounded p-2">
+                        <div className="flex flex-wrap gap-1 mb-2">
+                          {(['Clear', 'Plant', 'Tend', 'Harvest'] as const).map(t => (
+                            <button
+                              key={t}
+                              onClick={() => applyFieldTask(t)}
+                              className={`px-2 py-1 rounded text-xs border ${fieldTaskType === t ? 'bg-earth-500 border-earth-300 text-earth-100' : 'bg-earth-800 border-earth-700 text-earth-400'}`}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                        {fieldTaskType === 'Plant' && (
+                          <div className="flex flex-wrap gap-1 mb-2">
+                            {availableCrops.map(crop => (
+                              <button
+                                key={crop}
+                                onClick={() => applyFieldTask('Plant', crop)}
+                                className={`px-2 py-1 rounded text-xs border ${fieldCrop === crop ? 'bg-earth-500 border-earth-300 text-earth-100' : 'bg-earth-800 border-earth-700 text-earth-400'}`}
+                              >
+                                {CROP_LABELS[crop]}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between">
+                          <span className="text-earth-400 text-xs">Total workers for field</span>
+                          <WorkerCounter
+                            value={fieldWorkerTotal}
+                            onDecrease={() => setFieldWorkerTotal(Math.max(0, fieldWorkerTotal - 1))}
+                            onIncrease={() => setFieldWorkerTotal(fieldWorkerTotal + 1)}
+                            max={remaining + fieldWorkerTotal}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </Section>
           )}
 
           {/* ── SKILLED ASSIGNMENTS ── */}
@@ -502,7 +708,7 @@ export default function SeasonPlanner() {
                         <option value="">Select a tile…</option>
                         {tileOptions.map(t => (
                           <option key={t.id} value={t.id}>
-                            {t.terrain} {t.id} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
+                            #{tiles.findIndex(x => x.id === t.id) + 1} — {t.terrain} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
                           </option>
                         ))}
                       </select>
@@ -628,7 +834,7 @@ export default function SeasonPlanner() {
                         <option value="">Select a tile…</option>
                         {tileOptions.map(t => (
                           <option key={t.id} value={t.id}>
-                            {t.terrain} {t.id} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
+                            #{tiles.findIndex(x => x.id === t.id) + 1} — {t.terrain} {t.currentCrop ? `(${t.currentCrop})` : '(empty)'}
                           </option>
                         ))}
                       </select>
@@ -724,15 +930,16 @@ export default function SeasonPlanner() {
                   {(Object.keys(TERRAIN_LABELS) as TerrainType[]).map(terrain => {
                     const cost = LAND_PARCEL_COST[terrain]
                     const canAfford = finances.cashOnHand >= cost
+                    const flashKey = `buyLand-${terrain}`
                     return (
                       <div key={terrain} className="flex items-center justify-between">
                         <span className="text-earth-300 text-xs">{TERRAIN_LABELS[terrain]}</span>
                         <button
-                          onClick={() => buyLandParcel(terrain, false)}
+                          onClick={() => { buyLandParcel(terrain, false); flashAction(flashKey) }}
                           disabled={!canAfford}
-                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                          className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash[flashKey] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                         >
-                          ${cost}
+                          {actionFlash[flashKey] ? '✓ Bought' : `$${cost}`}
                         </button>
                       </div>
                     )
@@ -740,11 +947,11 @@ export default function SeasonPlanner() {
                   <div className="flex items-center justify-between pt-1 border-t border-earth-800 mt-1">
                     <span className="text-earth-400 text-xs">Water-adjacent (rice-capable) swamp</span>
                     <button
-                      onClick={() => buyLandParcel(TerrainType.Swamp, true)}
+                      onClick={() => { buyLandParcel(TerrainType.Swamp, true); flashAction('buyLand-swamp-water') }}
                       disabled={finances.cashOnHand < LAND_PARCEL_COST[TerrainType.Swamp] + WATER_ADJACENT_PRICE_PREMIUM}
-                      className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                      className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash['buyLand-swamp-water'] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                     >
-                      ${LAND_PARCEL_COST[TerrainType.Swamp] + WATER_ADJACENT_PRICE_PREMIUM}
+                      {actionFlash['buyLand-swamp-water'] ? '✓ Bought' : `$${LAND_PARCEL_COST[TerrainType.Swamp] + WATER_ADJACENT_PRICE_PREMIUM}`}
                     </button>
                   </div>
                 </div>
@@ -781,11 +988,12 @@ export default function SeasonPlanner() {
                             setLastHireMessage(
                               `Hired — now ${before + 1} worker(s) on the roster.`
                             )
+                            flashAction(`hire-${laborType}`)
                           }}
                           disabled={!canAfford}
-                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                          className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash[`hire-${laborType}`] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                         >
-                          {cost > 0 ? `Hire — $${cost}` : 'Hire'}
+                          {actionFlash[`hire-${laborType}`] ? '✓ Hired' : cost > 0 ? `Hire — $${cost}` : 'Hire'}
                         </button>
                       </div>
                     )
@@ -804,7 +1012,7 @@ export default function SeasonPlanner() {
           <Section title="Buy Supplies">
             <div className="px-4 py-3 space-y-3">
               <SupplyRow
-                label="Corn"
+                label="Food"
                 subLabel="$2 / unit — feeds workers"
                 value={cornToBuy}
                 onChange={setCornToBuy}
@@ -941,9 +1149,9 @@ export default function SeasonPlanner() {
                           {owned && <span className="text-soil-good text-[10px]">✓ have seeds</span>}
                         </div>
                         <button
-                          onClick={() => buySeeds(crop)}
+                          onClick={() => { buySeeds(crop); flashAction(`buySeeds-${crop}`) }}
                           disabled={owned || finances.cashOnHand < cost}
-                          className="px-3 py-1 bg-earth-600 text-earth-100 rounded text-xs disabled:opacity-40"
+                          className={`px-3 py-1 rounded text-xs disabled:opacity-40 transition-colors duration-300 ${actionFlash[`buySeeds-${crop}`] ? 'bg-soil-good text-white' : 'bg-earth-600 text-earth-100'}`}
                         >
                           {owned ? 'Owned' : `$${cost}`}
                         </button>

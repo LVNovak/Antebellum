@@ -191,6 +191,28 @@ export interface Tile {
   history: TileHistoryEntry[]
 }
 
+/**
+ * A named grouping of tiles — purely an organizational/UI convenience layer.
+ * Fields unlock once the plantation has 10+ cleared tiles, letting the player
+ * batch-assign tasks and workers to a whole group instead of tile-by-tile.
+ *
+ * Each tile inside a field keeps its own individual soil values, growth
+ * state, and observation hints — grouping never merges or averages soil.
+ * A field with mixed soil quality still shows mixed yields per tile even
+ * though the player planted/harvested it as one action.
+ *
+ * Default mode: one crop per field (uniform task/crop across all tiles).
+ * Advanced mode (mixedCropMode: true): tiles in the field can carry
+ * different crops; the field is just a shortcut for tile selection and
+ * worker allocation, not a shared crop assignment.
+ */
+export interface Field {
+  id:            string
+  name:          string
+  tileIds:       string[]
+  mixedCropMode: boolean   // false = one crop applies to the whole field
+}
+
 // ---------------------------------------------------------------------------
 // WORKERS
 // ---------------------------------------------------------------------------
@@ -470,6 +492,7 @@ export interface GameState {
 
   // The land
   tiles:        Tile[]
+  fields:       Field[]   // named tile groupings, unlocked at 10+ cleared tiles
 
   // The people
   workers:      Worker[]

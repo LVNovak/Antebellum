@@ -13,6 +13,14 @@ import { useGameStore } from '@store/gameStore'
 import { Worker, LaborType, HealthLevel } from '@engine/types'
 import { getHealthLabel, getHealthColorClass } from '@engine/labor'
 
+// No upgrade path yet — Social Standing (a later batch) will unlock this.
+// Read-only display for now so the owner's house isn't invisible state.
+const OWNER_HOUSE_LABELS: Record<number, string> = {
+  0: "Owner's house: rough starting structure",
+  1: "Owner's house: modest frame house",
+  2: "Owner's house: established plantation house",
+}
+
 const LABOR_TYPE_LABELS: Record<LaborType, string> = {
   [LaborType.EnslavedPurchased]: 'Enslaved (Purchased)',
   [LaborType.EnslavedHiredOut]:  'Enslaved (Hired)',
@@ -27,7 +35,7 @@ export default function LaborRoster() {
 
   if (!gameState) return null
 
-  const { workers, conditionsIndex, family } = gameState
+  const { workers, conditionsIndex, family, ownerHouseLevel } = gameState
 
   // Group workers by labor type
   const grouped = workers.reduce((acc, worker) => {
@@ -46,8 +54,11 @@ export default function LaborRoster() {
 
       {/* Family section — always shown first */}
       <div className="bg-earth-800 border border-earth-700 rounded overflow-hidden">
-        <div className="px-4 py-2 bg-earth-750 border-b border-earth-700">
+        <div className="px-4 py-2 bg-earth-750 border-b border-earth-700 flex items-center justify-between">
           <span className="text-earth-300 text-xs font-bold uppercase tracking-wide">Household</span>
+          <span className="text-earth-500 text-[10px]">
+            {OWNER_HOUSE_LABELS[ownerHouseLevel ?? 0] ?? OWNER_HOUSE_LABELS[0]}
+          </span>
         </div>
         {(family ?? []).map(member => (
           <div key={member.id} className="px-4 py-3 flex justify-between items-center border-b border-earth-700 last:border-0">

@@ -622,8 +622,8 @@ export function resolveSeasonEnd(state: GameState): GameState {
     events.push({
       id: generateId(), season, year,
       category: 'Labor',
-      title: 'Corn Shortage',
-      description: `You are ${cornShortfall.toFixed(0)} unit(s) of corn short of feeding your workforce. Worker health will decline.`,
+      title: 'Food Shortage',
+      description: `You are ${cornShortfall.toFixed(0)} unit(s) of food short of feeding your workforce. Worker health will decline.`,
       effects: ['Labor health declining this season'],
     })
   }
@@ -859,7 +859,7 @@ export function resolveSeasonEnd(state: GameState): GameState {
       next.finances.cashOnHand -= FREEDOM_DUES_CASH
 
       next.transactionLog.push(recordTransaction({
-        description: `Freedom dues paid to ${worker.name} — ${cornPaid} corn + $${FREEDOM_DUES_CASH} cash (or pay $${FREEDOM_DUES_BUYOUT_CASH} buyout instead)`,
+        description: `Freedom dues paid to ${worker.name} — ${cornPaid} food + $${FREEDOM_DUES_CASH} cash (or pay $${FREEDOM_DUES_BUYOUT_CASH} buyout instead)`,
         amount: -FREEDOM_DUES_CASH,
         newCashOnHand: next.finances.cashOnHand,
         season, year,
@@ -869,11 +869,11 @@ export function resolveSeasonEnd(state: GameState): GameState {
         id: generateId(), season, year,
         category: 'Labor',
         title: 'Indenture Term Complete',
-        description: `${worker.name}'s indenture has ended. Freedom dues of ${cornPaid} corn and $${FREEDOM_DUES_CASH} have been paid. They are now free — offer wage employment or release them in the Labor Roster.`,
+        description: `${worker.name}'s indenture has ended. Freedom dues of ${cornPaid} food and $${FREEDOM_DUES_CASH} have been paid. They are now free — offer wage employment or release them in the Labor Roster.`,
         effects: [
-          `${cornPaid} corn drawn from your stores`,
+          `${cornPaid} food drawn from your stores`,
           `$${FREEDOM_DUES_CASH} cash paid as freedom dues`,
-          `Alternative: pay $${FREEDOM_DUES_BUYOUT_CASH} cash buyout (no corn) — release via Labor Roster`,
+          `Alternative: pay $${FREEDOM_DUES_BUYOUT_CASH} cash buyout (no food) — release via Labor Roster`,
         ],
       })
       // Convert to free wage on expiry — player can release via the roster
