@@ -412,7 +412,7 @@ export default function SeasonPlanner() {
                 const currentType = currentTask?.type ?? 'null'
                 const needsTile = currentType === 'ClearLand' || currentType === 'PlantCrop' || currentType === 'TendCrop' || currentType === 'HarvestCrop'
                 const currentTileId = needsTile && currentTask && 'tileId' in currentTask ? currentTask.tileId : ''
-                const currentCropChoice = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
+                const currentCropChoice: CropType | null = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
 
                 // Recommend the task that matches the worker's skill
                 const RECOMMENDED_TASK: Record<string, string> = {
@@ -425,7 +425,7 @@ export default function SeasonPlanner() {
                 const TASK_TYPES = [
                   { label: 'Rest', value: 'null' },
                   { label: 'Clear Land', value: 'ClearLand' },
-                  { label: 'Plant Crop', value: 'PlantCrop' },
+                  { label: 'Plant Crop', value: 'PlantCrop', disabled: availableCrops.length === 0 },
                   { label: 'Tend Crop', value: 'TendCrop' },
                   { label: 'Harvest Crop', value: 'HarvestCrop' },
                   { label: 'Repair Cabin', value: 'RepairCabin' },
@@ -447,7 +447,10 @@ export default function SeasonPlanner() {
                   if (newType === 'RepairCabin')   { setSkilledWorkerTask(worker.id, { type: 'RepairCabin', cabinId: cabins[0]?.id ?? 'cabin-1' }); return }
                   if (newType === 'ManageStorage') { setSkilledWorkerTask(worker.id, { type: 'ManageStorage' }); return }
                   if (newType === 'TendCompost')   { setSkilledWorkerTask(worker.id, { type: 'TendCompost' }); return }
-                  if (newType === 'PlantCrop')  { setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId: '', crop: null }); return }
+                  if (newType === 'PlantCrop' && availableCrops.length > 0) {
+                    setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId: '', crop: availableCrops[0] })
+                    return
+                  }
                   if (newType === 'TendCrop')   { setSkilledWorkerTask(worker.id, { type: 'TendCrop', tileId: '' }); return }
                   if (newType === 'HarvestCrop'){ setSkilledWorkerTask(worker.id, { type: 'HarvestCrop', tileId: '' }); return }
                 }
@@ -455,7 +458,7 @@ export default function SeasonPlanner() {
                 function handleTileChange(tileId: string) {
                   if (currentType === 'ClearLand') {
                     setSkilledWorkerTask(worker.id, { type: 'ClearLand', tileId })
-                  } else if (currentType === 'PlantCrop') {
+                  } else if (currentType === 'PlantCrop' && currentCropChoice) {
                     setSkilledWorkerTask(worker.id, { type: 'PlantCrop', tileId, crop: currentCropChoice })
                   } else if (currentType === 'TendCrop') {
                     setSkilledWorkerTask(worker.id, { type: 'TendCrop', tileId })
@@ -485,7 +488,9 @@ export default function SeasonPlanner() {
                       className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
                     >
                       {TASK_TYPES.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
+                        <option key={t.value} value={t.value} disabled={'disabled' in t && t.disabled}>
+                          {t.label}{'disabled' in t && t.disabled ? ' (no seeds)' : ''}
+                        </option>
                       ))}
                     </select>
                     {needsTile && (
@@ -540,12 +545,12 @@ export default function SeasonPlanner() {
                 const currentType = currentTask?.type ?? 'null'
                 const needsTile = currentType === 'ClearLand' || currentType === 'PlantCrop' || currentType === 'TendCrop' || currentType === 'HarvestCrop'
                 const currentTileId = needsTile && currentTask && 'tileId' in currentTask ? currentTask.tileId : ''
-                const currentCropChoice = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
+                const currentCropChoice: CropType | null = currentType === 'PlantCrop' && currentTask && 'crop' in currentTask ? currentTask.crop : null
 
                 const TASK_TYPES = [
                   { label: 'Rest', value: 'null' },
                   { label: 'Clear Land', value: 'ClearLand' },
-                  { label: 'Plant Crop', value: 'PlantCrop' },
+                  { label: 'Plant Crop', value: 'PlantCrop', disabled: availableCrops.length === 0 },
                   { label: 'Tend Crop', value: 'TendCrop' },
                   { label: 'Harvest Crop', value: 'HarvestCrop' },
                   { label: 'Repair Cabin', value: 'RepairCabin' },
@@ -570,7 +575,10 @@ export default function SeasonPlanner() {
                   if (newType === 'RepairCabin')   { setFamilyTask(member.id, { type: 'RepairCabin', cabinId: cabins[0]?.id ?? 'cabin-1' }); return }
                   if (newType === 'ManageStorage') { setFamilyTask(member.id, { type: 'ManageStorage' }); return }
                   if (newType === 'TendCompost')   { setFamilyTask(member.id, { type: 'TendCompost' }); return }
-                  if (newType === 'PlantCrop')  { setFamilyTask(member.id, { type: 'PlantCrop', tileId: '', crop: null }); return }
+                  if (newType === 'PlantCrop' && availableCrops.length > 0) {
+                    setFamilyTask(member.id, { type: 'PlantCrop', tileId: '', crop: availableCrops[0] })
+                    return
+                  }
                   if (newType === 'TendCrop')   { setFamilyTask(member.id, { type: 'TendCrop', tileId: '' }); return }
                   if (newType === 'HarvestCrop'){ setFamilyTask(member.id, { type: 'HarvestCrop', tileId: '' }); return }
                 }
@@ -578,7 +586,7 @@ export default function SeasonPlanner() {
                 function handleTileChange(tileId: string) {
                   if (currentType === 'ClearLand') {
                     setFamilyTask(member.id, { type: 'ClearLand', tileId })
-                  } else if (currentType === 'PlantCrop') {
+                  } else if (currentType === 'PlantCrop' && currentCropChoice) {
                     setFamilyTask(member.id, { type: 'PlantCrop', tileId, crop: currentCropChoice })
                   } else if (currentType === 'TendCrop') {
                     setFamilyTask(member.id, { type: 'TendCrop', tileId })
@@ -606,7 +614,9 @@ export default function SeasonPlanner() {
                       className="w-full bg-earth-700 border border-earth-600 text-earth-200 text-sm px-2 py-1 rounded"
                     >
                       {TASK_TYPES.map(t => (
-                        <option key={t.value} value={t.value}>{t.label}</option>
+                        <option key={t.value} value={t.value} disabled={'disabled' in t && t.disabled}>
+                          {t.label}{'disabled' in t && t.disabled ? ' (no seeds)' : ''}
+                        </option>
                       ))}
                     </select>
                     {needsTile && (
